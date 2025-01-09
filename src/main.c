@@ -9,6 +9,13 @@
 #define PORT 8080
 #define BUFFER_SIZE 1024
 
+//Priorities:
+// Serve different file types
+// Construct response correctly (make a struct?)
+// Handle incorrect requests
+// Handle GET and HEAD
+// Implement multiplexing or threads
+
 int main(int arg, const char *argv[])
 {
     char               buffer[BUFFER_SIZE];
