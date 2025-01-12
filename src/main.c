@@ -14,6 +14,8 @@
 #define HTTP_OK "HTTP/1.0 200 OK\r\n"
 #define HTTP_CONTENT_TYPE "Content-Type: text/html\r\n"
 #define HTTP_CONTENT_SIZE 22
+#define REQ_HEADER_LEN 5
+#define PATH_LEN 1024
 
 // Priorities:
 //  Serve different file types
@@ -22,7 +24,10 @@
 //  Handle GET and HEAD
 //  Implement multiplexing or threads
 
-int write_to_client(int newsockfd, const char *ok_msg, const char *content_type, const char *content_length, unsigned long content_length_size);
+int  write_to_client(int newsockfd, const char *ok_msg, const char *content_type, const char *content_length, unsigned long content_length_size);
+int  is_get_request(const char *req_header);
+int  is_head_request(const char *req_header);
+void set_request_path(char *req_path, const char *buffer);
 
 int main(int arg, const char *argv[])
 {
@@ -76,6 +81,8 @@ int main(int arg, const char *argv[])
         int     sockn;
         ssize_t valread;
         ssize_t valwrite;
+        char    req_header[REQ_HEADER_LEN + 1];
+        char    req_path[PATH_LEN];
 
         // Accept incoming connections
         int newsockfd = accept(sockfd, (struct sockaddr *)&host_addr, (socklen_t *)&host_addrlen);
@@ -102,7 +109,20 @@ int main(int arg, const char *argv[])
             continue;
         }
         printf("[%s:%u]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-        printf("%s\n", buffer);
+        printf("buffer: %s\n", buffer);
+
+        // check that it is a GET or HEAD request
+        strncpy(req_header, buffer, REQ_HEADER_LEN - 1);
+        req_header[REQ_HEADER_LEN] = '\0';
+        printf("req_header: %s\n", req_header);
+        if(is_get_request(req_header) < 0 && is_head_request(req_header) < 0)
+        {
+            perror("webserver (request header)");
+            continue;
+        }
+
+        // get the / to the white space from the buffer and put it in req_path
+        set_request_path(req_path, buffer);
 
         // TODO: if or switch statements for different kinds of acceptable requests and what they should return
         valwrite = write_to_client(newsockfd, HTTP_OK, HTTP_CONTENT_TYPE, "Content-Length: 25\r\n\r\n", HTTP_CONTENT_SIZE);
@@ -175,4 +195,42 @@ int write_to_client(int newsockfd, const char *ok_msg, const char *content_type,
     }
     close(file_fd);
     return 0;
+}
+
+int is_get_request(const char *req_header)
+{
+    if(strcmp(req_header, "GET ") == 0)
+    {
+        return 0;
+    }
+    return -1;
+}
+
+int is_head_request(const char *req_header)
+{
+    if(strcmp(req_header, "HEAD") == 0)
+    {
+        return 0;
+    }
+    return -1;
+}
+
+void set_request_path(char *req_path, const char *buffer)
+{
+    char c;
+    int  i = 0;
+    int  j = 0;
+    c      = buffer[i];
+    while(c != ' ')
+    {
+        c = buffer[++i];
+    }
+    c = buffer[++i];
+    while(c != ' ')
+    {
+        req_path[j++] = c;
+        c             = buffer[++i];
+    }
+    req_path[j] = '\0';
+    printf("request path: %s\n", req_path);
 }
