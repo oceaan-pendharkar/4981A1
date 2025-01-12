@@ -14,10 +14,10 @@
 #define HTTP_OK "HTTP/1.0 200 OK\r\n"
 #define HTTP_NOT_FOUND "HTTP/1.0 404 Not Found\r\n"
 #define HTTP_CONTENT_TYPE "Content-Type: text/html\r\n"
-#define HTTP_OK_CONTENT_LENGTH_MSG "Content-Length: 25\r\n\r\n"
-#define HTTP_404_CONTENT_LENGTH_MSG "Content-Length: 20\r\n\r\n"
 #define REQ_HEADER_LEN 5
 #define PATH_LEN 1024
+#define CONTENT_LEN_BUF 100
+#define TEN 10
 
 // FILE_PATH_LEN is the length we have to append to include ./resources to the path
 // we want to open the file we're serving at
@@ -33,6 +33,7 @@ int  write_to_client(int newsockfd, const char *request_path);
 int  is_get_request(const char *req_header);
 int  is_head_request(const char *req_header);
 void set_request_path(char *req_path, const char *buffer);
+void int_to_string(char *string, unsigned long n);
 
 int main(int arg, const char *argv[])
 {
@@ -162,6 +163,8 @@ int write_to_client(int newsockfd, const char *request_path)
     ssize_t       valwrite;
     char          c;
     unsigned long length = 0;
+    char          content_len_buffer[CONTENT_LEN_BUF];
+    char          content_length_msg[BUFFER_SIZE] = "Content-Length: ";
 
     // get the content of the file with fd and put it in resp
     if(strcmp(request_path, "/") == 0)
@@ -214,14 +217,12 @@ int write_to_client(int newsockfd, const char *request_path)
     strncat(response_string, HTTP_CONTENT_TYPE, strlen(HTTP_CONTENT_TYPE));
 
     // append content length section
-    if(strcmp(request_path, "/") == 0)
-    {
-        strncat(response_string, HTTP_OK_CONTENT_LENGTH_MSG, length + 2);
-    }
-    else
-    {
-        strncat(response_string, HTTP_404_CONTENT_LENGTH_MSG, length + 2);
-    }
+
+    int_to_string(content_len_buffer, length);
+    strncat(content_length_msg, content_len_buffer, strlen(content_len_buffer));
+    strncat(content_length_msg, "\r\n\r\n", 4);
+    printf("content_length_msg: %s\n", content_length_msg);
+    strncat(response_string, content_length_msg, length + 2);
 
     // append body section (TODO: don't do this if it's a HEAD req)
     strncat(response_string, content_string, length);
@@ -275,4 +276,28 @@ void set_request_path(char *req_path, const char *buffer)
     }
     req_path[j] = '\0';
     printf("request path: %s\n", req_path);
+}
+
+void int_to_string(char *string, unsigned long n)
+{
+    char          buffer[TEN] = {0};
+    int           digits      = 0;
+    unsigned long i           = n;
+
+    if(n == 0)
+    {
+        string[0] = '0';
+        string[1] = '\0';
+        return;
+    }
+    buffer[0] = '\0';
+    while(i != 0)
+    {
+        buffer[digits++] = (char)((i % TEN) + '0');
+        i                = i / TEN;
+    }
+    for(int j = 0; j < digits; j++)
+    {
+        string[j] = buffer[digits - j - 1];
+    }
 }
