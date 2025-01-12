@@ -115,9 +115,16 @@ int main(int arg, const char *argv[])
         close(newsockfd);
     }
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunreachable-code-return"
+#if defined(__clang__)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wunreachable-code-return"
+#elif defined(__GNUC__)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wunreachable-code"
+#endif
+
     return 0;
+
 #pragma GCC diagnostic pop
 }
 
@@ -153,6 +160,7 @@ int write_to_client(int newsockfd, const char *ok_msg, const char *content_type,
     if(valread < 0)
     {
         perror("webserver (read)");
+        close(file_fd);
         return -1;
     }
     content_string[length] = '\0';
@@ -162,7 +170,9 @@ int write_to_client(int newsockfd, const char *ok_msg, const char *content_type,
     if(valwrite < 0)
     {
         perror("webserver (write)");
+        close(file_fd);
         return -1;
     }
+    close(file_fd);
     return 0;
 }
