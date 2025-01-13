@@ -14,7 +14,7 @@
 #define HTTP_OK "HTTP/1.0 200 OK\r\n"
 #define HTTP_NOT_FOUND "HTTP/1.0 404 Not Found\r\n"
 
-//TODO: create switch statement and generate dynamically
+// TODO: create switch statement and generate dynamically
 #define HTTP_CONTENT_TYPE "Content-Type: text/html\r\n"
 #define REQ_HEADER_LEN 5
 #define PATH_LEN 1024
@@ -41,6 +41,7 @@ void append_msg_to_response_string(char *response, const char *msg);
 void append_content_length_msg(char *response_string, unsigned long length);
 void append_body(char *response_string, const char *content_string, unsigned long length);
 int  write_to_client(int file_fd, int newsockfd, const char *response_string);
+int  write_to_content_string(char *content_string, unsigned long *length, int file_fd);
 
 int main(int arg, const char *argv[])
 {
@@ -131,6 +132,11 @@ int main(int arg, const char *argv[])
         if(is_get_request(req_header) < 0 && is_head_request(req_header) < 0)
         {
             perror("webserver (wrong request type)");    // our server only handles GET and HEAD
+            valwrite = handle_client(newsockfd, "/405.txt");
+            if(valwrite == -1)
+            {
+                perror("webserver (handle_client)");
+            }
             continue;
         }
 
@@ -166,8 +172,7 @@ int handle_client(int newsockfd, const char *request_path)
     char          response_string[BUFFER_SIZE];
     char          content_string[BUFFER_SIZE];
     int           file_fd;
-    ssize_t       valread;
-    char          c;
+    int           valread;
     unsigned long length = 0;
 
     // get the content of the file with file_fd
@@ -196,19 +201,12 @@ int handle_client(int newsockfd, const char *request_path)
         append_msg_to_response_string(response_string, HTTP_OK);
     }
 
-    printf("reading from file\n");
-    while((valread = read(file_fd, &c, 1)) > 0 && c != '\0')
+    valread = write_to_content_string(content_string, &length, file_fd);
+    if(valread == -1)
     {
-        // write c to response_string
-        content_string[length++] = c;
-    }
-    if(valread < 0)
-    {
-        perror("webserver (read)");
-        close(file_fd);
+        perror("webserver (write)");
         return -1;
     }
-    content_string[length] = '\0';
 
     // append content type line
     // only deals with http content type right now
@@ -338,5 +336,25 @@ int write_to_client(int file_fd, int newsockfd, const char *response_string)
         return -1;
     }
     close(file_fd);
+    return 0;
+}
+
+int write_to_content_string(char *content_string, unsigned long *length, int file_fd)
+{
+    ssize_t valread;
+    char    c;
+    printf("reading from file\n");
+    while((valread = read(file_fd, &c, 1)) > 0 && c != '\0')
+    {
+        // write c to response_string
+        content_string[(*length)++] = c;
+    }
+    if(valread < 0)
+    {
+        perror("webserver (read)");
+        close(file_fd);
+        return -1;
+    }
+    content_string[*length] = '\0';
     return 0;
 }
