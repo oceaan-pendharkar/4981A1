@@ -9,10 +9,12 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define PORT 8081
+#define PORT 8080
 #define BUFFER_SIZE 1024
 #define HTTP_OK "HTTP/1.0 200 OK\r\n"
 #define HTTP_NOT_FOUND "HTTP/1.0 404 Not Found\r\n"
+
+//TODO: create switch statement and generate dynamically
 #define HTTP_CONTENT_TYPE "Content-Type: text/html\r\n"
 #define REQ_HEADER_LEN 5
 #define PATH_LEN 1024
@@ -37,6 +39,8 @@ void int_to_string(char *string, unsigned long n);
 void open_file_at_path(const char *request_path, int *file_fd);
 void append_msg_to_response_string(char *response, const char *msg);
 void append_content_length_msg(char *response_string, unsigned long length);
+void append_body(char *response_string, const char *content_string, unsigned long length);
+int  write_to_client(int file_fd, int newsockfd, const char *response_string);
 
 int main(int arg, const char *argv[])
 {
@@ -163,7 +167,6 @@ int handle_client(int newsockfd, const char *request_path)
     char          content_string[BUFFER_SIZE];
     int           file_fd;
     ssize_t       valread;
-    ssize_t       valwrite;
     char          c;
     unsigned long length = 0;
 
@@ -216,19 +219,10 @@ int handle_client(int newsockfd, const char *request_path)
     append_content_length_msg(response_string, length);
 
     // append body section (TODO: don't do this if it's a HEAD req)
-    strncat(response_string, content_string, length);
-    strncat(response_string, "\r\n", 2);
+    append_body(response_string, content_string, length);
 
     // write to client
-    valwrite = write(newsockfd, response_string, strlen(response_string));
-    if(valwrite < 0)
-    {
-        perror("webserver (write)");
-        close(file_fd);
-        return -1;
-    }
-    close(file_fd);
-    return 0;
+    return write_to_client(file_fd, newsockfd, response_string);
 }
 
 int is_get_request(const char *req_header)
@@ -313,7 +307,7 @@ void append_msg_to_response_string(char *response, const char *msg)
     response[strlen(msg) - 1] = '\0';
 }
 
-//This one is special because it has the extra \r\n and needs to be constructed with the appropriate length
+// This one is special because it has the extra \r\n and needs to be constructed with the appropriate length
 void append_content_length_msg(char *response_string, unsigned long length)
 {
     char content_len_buffer[CONTENT_LEN_BUF];
@@ -325,4 +319,24 @@ void append_content_length_msg(char *response_string, unsigned long length)
     printf("content_length_msg: %s\n", content_length_msg);
     strncat(response_string, content_length_msg, length + 2);
     printf("response string: %s\n", response_string);
+}
+
+void append_body(char *response_string, const char *content_string, unsigned long length)
+{
+    strncat(response_string, content_string, length);
+    strncat(response_string, "\r\n", 2);
+}
+
+int write_to_client(int file_fd, int newsockfd, const char *response_string)
+{
+    ssize_t valwrite;
+    valwrite = write(newsockfd, response_string, strlen(response_string));
+    if(valwrite < 0)
+    {
+        perror("webserver (write)");
+        close(file_fd);
+        return -1;
+    }
+    close(file_fd);
+    return 0;
 }
