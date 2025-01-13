@@ -9,7 +9,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define PORT 8080
+#define PORT 8081
 #define BUFFER_SIZE 1024
 #define HTTP_OK "HTTP/1.0 200 OK\r\n"
 #define HTTP_NOT_FOUND "HTTP/1.0 404 Not Found\r\n"
@@ -29,11 +29,14 @@
 //  Handle GET and HEAD
 //  Implement multiplexing or threads
 
-int  write_to_client(int newsockfd, const char *request_path);
+int  handle_client(int newsockfd, const char *request_path);
 int  is_get_request(const char *req_header);
 int  is_head_request(const char *req_header);
 void set_request_path(char *req_path, const char *buffer);
 void int_to_string(char *string, unsigned long n);
+void open_file_at_path(const char *request_path, int *file_fd);
+void append_msg_to_response_string(char *response, const char *msg);
+void append_content_length_msg(char *response_string, unsigned long length);
 
 int main(int arg, const char *argv[])
 {
@@ -123,15 +126,15 @@ int main(int arg, const char *argv[])
         printf("req_header: %s\n", req_header);
         if(is_get_request(req_header) < 0 && is_head_request(req_header) < 0)
         {
-            perror("webserver (request header)");
+            perror("webserver (wrong request type)");    // our server only handles GET and HEAD
             continue;
         }
 
-        // get the / to the white space from the buffer and put it in req_path
+        // gets the substring from the / to the white space from the buffer and put it in req_path
+        // this is the path of the file the request wants to access
         set_request_path(req_path, buffer);
 
-        // TODO: if or switch statements for different kinds of acceptable requests and what they should return
-        valwrite = write_to_client(newsockfd, req_path);
+        valwrite = handle_client(newsockfd, req_path);
         if(valwrite == -1)
         {
             continue;
@@ -154,7 +157,7 @@ int main(int arg, const char *argv[])
 #pragma GCC diagnostic pop
 }
 
-int write_to_client(int newsockfd, const char *request_path)
+int handle_client(int newsockfd, const char *request_path)
 {
     char          response_string[BUFFER_SIZE];
     char          content_string[BUFFER_SIZE];
@@ -163,30 +166,21 @@ int write_to_client(int newsockfd, const char *request_path)
     ssize_t       valwrite;
     char          c;
     unsigned long length = 0;
-    char          content_len_buffer[CONTENT_LEN_BUF];
-    char          content_length_msg[BUFFER_SIZE] = "Content-Length: ";
 
-    // get the content of the file with fd and put it in resp
+    // get the content of the file with file_fd
     if(strcmp(request_path, "/") == 0)
     {
         file_fd = open("./resources/index.html", O_RDONLY | O_CLOEXEC);
     }
     else
     {
-        char *path = (char *)malloc(sizeof(char) * (strlen(request_path) + FILE_PATH_LEN));
-        strncpy(path, "./resources", FILE_PATH_LEN);
-        strncpy(path + FILE_PATH_LEN, request_path, strlen(request_path));
-        printf("file path: %s\n", path);
-        file_fd = open(path, O_RDONLY | O_CLOEXEC);
-        free(path);
+        open_file_at_path(request_path, &file_fd);
     }
     if(file_fd == -1)
     {
-        // This means the file was not found/openable
-        perror("webserver (open)");
-        strncpy(response_string, HTTP_NOT_FOUND, sizeof(HTTP_NOT_FOUND) - 1);
-        response_string[sizeof(HTTP_NOT_FOUND) - 1] = '\0';
-        file_fd                                     = open("./resources/404.html", O_RDONLY | O_CLOEXEC);
+        // This means the file requested was not found/openable
+        append_msg_to_response_string(response_string, HTTP_NOT_FOUND);
+        file_fd = open("./resources/404.html", O_RDONLY | O_CLOEXEC);
         if(file_fd == -1)
         {
             perror("webserver (open)");
@@ -195,8 +189,8 @@ int write_to_client(int newsockfd, const char *request_path)
     }
     else
     {
-        strncpy(response_string, HTTP_OK, sizeof(HTTP_OK) - 1);
-        response_string[sizeof(HTTP_OK) - 1] = '\0';
+        // This means the file was found so we will return 200
+        append_msg_to_response_string(response_string, HTTP_OK);
     }
 
     printf("reading from file\n");
@@ -213,16 +207,13 @@ int write_to_client(int newsockfd, const char *request_path)
     }
     content_string[length] = '\0';
 
+    // append content type line
     // only deals with http content type right now
     strncat(response_string, HTTP_CONTENT_TYPE, strlen(HTTP_CONTENT_TYPE));
 
-    // append content length section
-
-    int_to_string(content_len_buffer, length);
-    strncat(content_length_msg, content_len_buffer, strlen(content_len_buffer));
-    strncat(content_length_msg, "\r\n\r\n", 4);
-    printf("content_length_msg: %s\n", content_length_msg);
-    strncat(response_string, content_length_msg, length + 2);
+    // append content length section (can only do this once we have the body)
+    // but must be appended before the body
+    append_content_length_msg(response_string, length);
 
     // append body section (TODO: don't do this if it's a HEAD req)
     strncat(response_string, content_string, length);
@@ -290,14 +281,48 @@ void int_to_string(char *string, unsigned long n)
         string[1] = '\0';
         return;
     }
-    buffer[0] = '\0';
-    while(i != 0)
+
+    while(i > 0)
     {
         buffer[digits++] = (char)((i % TEN) + '0');
         i                = i / TEN;
+        printf("%lu\n", i);
     }
+
+    printf("digits: %d\n", digits);
     for(int j = 0; j < digits; j++)
     {
         string[j] = buffer[digits - j - 1];
     }
+    string[digits] = '\0';
+}
+
+void open_file_at_path(const char *request_path, int *file_fd)
+{
+    char *path = (char *)malloc(sizeof(char) * (strlen(request_path) + FILE_PATH_LEN + 1));
+    strncpy(path, "./resources", FILE_PATH_LEN);
+    strncpy(path + FILE_PATH_LEN, request_path, strlen(request_path) + 1);
+    printf("file path: %s\n", path);
+    *file_fd = open(path, O_RDONLY | O_CLOEXEC);
+    free(path);
+}
+
+void append_msg_to_response_string(char *response, const char *msg)
+{
+    strncpy(response, msg, strlen(msg) - 1);
+    response[strlen(msg) - 1] = '\0';
+}
+
+//This one is special because it has the extra \r\n and needs to be constructed with the appropriate length
+void append_content_length_msg(char *response_string, unsigned long length)
+{
+    char content_len_buffer[CONTENT_LEN_BUF];
+    char content_length_msg[BUFFER_SIZE] = "Content-Length: ";
+    int_to_string(content_len_buffer, length);
+    printf("content length: %s\n", content_len_buffer);
+    strncat(content_length_msg, content_len_buffer, strlen(content_len_buffer));
+    strncat(content_length_msg, "\r\n\r\n", 4);
+    printf("content_length_msg: %s\n", content_length_msg);
+    strncat(response_string, content_length_msg, length + 2);
+    printf("response string: %s\n", response_string);
 }
