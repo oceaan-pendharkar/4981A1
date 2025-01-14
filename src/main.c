@@ -131,12 +131,14 @@ int main(int arg, const char *argv[])
         printf("req_header: %s\n", req_header);
         if(is_get_request(req_header) < 0 && is_head_request(req_header) < 0)
         {
-            perror("webserver (wrong request type)");    // our server only handles GET and HEAD
+            //            perror("webserver (wrong request type)");    // our server only handles GET and HEAD
             valwrite = handle_client(newsockfd, "/405.txt");
             if(valwrite == -1)
             {
                 perror("webserver (handle_client)");
             }
+            printf("closing connection\n");
+            close(newsockfd);
             continue;
         }
 
@@ -180,6 +182,22 @@ int handle_client(int newsockfd, const char *request_path)
     {
         file_fd = open("./resources/index.html", O_RDONLY | O_CLOEXEC);
     }
+    else if(strcmp(request_path, "/405.txt") == 0)
+    {
+        file_fd = open("./resources/405.txt", O_RDONLY | O_CLOEXEC);
+        if(file_fd == -1)
+        {
+            perror("webserver (open)");
+            return -1;
+        }
+        valread = write_to_content_string(content_string, &length, file_fd);
+        if(valread == -1)
+        {
+            perror("webserver (write_to_content_string)");
+            return -1;
+        }
+        return write_to_client(file_fd, newsockfd, content_string);
+    }
     else
     {
         open_file_at_path(request_path, &file_fd);
@@ -204,7 +222,7 @@ int handle_client(int newsockfd, const char *request_path)
     valread = write_to_content_string(content_string, &length, file_fd);
     if(valread == -1)
     {
-        perror("webserver (write)");
+        perror("webserver (write http response body)");
         return -1;
     }
 
@@ -344,7 +362,7 @@ int write_to_content_string(char *content_string, unsigned long *length, int fil
     ssize_t valread;
     char    c;
     printf("reading from file\n");
-    while((valread = read(file_fd, &c, 1)) > 0 && c != '\0')
+    while((valread = read(file_fd, &c, 1)) > 0 && c != '\0' && c != EOF)
     {
         // write c to response_string
         content_string[(*length)++] = c;

@@ -1,5 +1,5 @@
 HTTP/1.0 405 Method Not Allowed
-Allow: GET, POST
+Allow: GET, HEAD
 Content-Type: text/plain
 Content-Length: 23
 
