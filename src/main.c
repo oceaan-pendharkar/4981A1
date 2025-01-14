@@ -32,7 +32,7 @@
 //  Handle GET and HEAD
 //  Implement multiplexing or threads
 
-int  handle_client(int newsockfd, const char *request_path);
+int  handle_client(int newsockfd, const char *request_path, int is_head);
 int  is_get_request(const char *req_header);
 int  is_head_request(const char *req_header);
 void set_request_path(char *req_path, const char *buffer);
@@ -99,6 +99,7 @@ int main(int arg, const char *argv[])
         ssize_t valwrite;
         char    req_header[REQ_HEADER_LEN + 1];
         char    req_path[PATH_LEN];
+        int     is_head = 0;
 
         // Accept incoming connections
         int newsockfd = accept(sockfd, (struct sockaddr *)&host_addr, (socklen_t *)&host_addrlen);
@@ -143,7 +144,12 @@ int main(int arg, const char *argv[])
             set_request_path(req_path, buffer);
         }
         printf("req_path: %s\n", req_path);
-        valwrite = handle_client(newsockfd, req_path);
+
+        if(is_head_request(req_header) == 0)
+        {
+            is_head = 1;
+        }
+        valwrite = handle_client(newsockfd, req_path, is_head);
         if(valwrite == -1)
         {
             continue;
@@ -165,7 +171,7 @@ int main(int arg, const char *argv[])
 #pragma GCC diagnostic pop
 }
 
-int handle_client(int newsockfd, const char *request_path)
+int handle_client(int newsockfd, const char *request_path, int is_head)
 {
     char          response_string[BUFFER_SIZE];
     char          content_string[BUFFER_SIZE];
@@ -220,8 +226,11 @@ int handle_client(int newsockfd, const char *request_path)
     // but must be appended before the body
     append_content_length_msg(response_string, length);
 
-    // append body section (TODO: don't do this if it's a HEAD req)
-    append_body(response_string, content_string, length);
+    // append body section, only if not head request
+    if(is_head == 0)
+    {
+        append_body(response_string, content_string, length);
+    }
 
     // write to client
     return write_to_client(file_fd, newsockfd, response_string);
