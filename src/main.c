@@ -20,6 +20,7 @@
 #define PATH_LEN 1024
 #define CONTENT_LEN_BUF 100
 #define TEN 10
+#define LEN_405 9
 
 // FILE_PATH_LEN is the length we have to append to include ./resources to the path
 // we want to open the file we're serving at
@@ -42,6 +43,7 @@ void append_content_length_msg(char *response_string, unsigned long length);
 void append_body(char *response_string, const char *content_string, unsigned long length);
 int  write_to_client(int file_fd, int newsockfd, const char *response_string);
 int  write_to_content_string(char *content_string, unsigned long *length, int file_fd);
+int  write_405(int newsockfd, char *content_string, unsigned long *length);
 
 int main(int arg, const char *argv[])
 {
@@ -131,27 +133,21 @@ int main(int arg, const char *argv[])
         printf("req_header: %s\n", req_header);
         if(is_get_request(req_header) < 0 && is_head_request(req_header) < 0)
         {
-            //            perror("webserver (wrong request type)");    // our server only handles GET and HEAD
-            valwrite = handle_client(newsockfd, "/405.txt");
-            if(valwrite == -1)
-            {
-                perror("webserver (handle_client)");
-            }
-            printf("closing connection\n");
-            close(newsockfd);
-            continue;
+            strncpy(req_path, "/405.txt", LEN_405);
+            req_path[TEN] = '\0';
         }
-
-        // gets the substring from the / to the white space from the buffer and put it in req_path
-        // this is the path of the file the request wants to access
-        set_request_path(req_path, buffer);
-
+        else
+        {
+            // gets the substring from the / to the white space from the buffer and put it in req_path
+            // this is the path of the file the request wants to access
+            set_request_path(req_path, buffer);
+        }
+        printf("req_path: %s\n", req_path);
         valwrite = handle_client(newsockfd, req_path);
         if(valwrite == -1)
         {
             continue;
         }
-
         printf("closing connection\n");
         close(newsockfd);
     }
@@ -177,26 +173,16 @@ int handle_client(int newsockfd, const char *request_path)
     int           valread;
     unsigned long length = 0;
 
+    if(strcmp(request_path, "/405.txt") == 0)
+    {
+        write_405(newsockfd, content_string, &length);
+        return 0;
+    }
+
     // get the content of the file with file_fd
     if(strcmp(request_path, "/") == 0)
     {
         file_fd = open("./resources/index.html", O_RDONLY | O_CLOEXEC);
-    }
-    else if(strcmp(request_path, "/405.txt") == 0)
-    {
-        file_fd = open("./resources/405.txt", O_RDONLY | O_CLOEXEC);
-        if(file_fd == -1)
-        {
-            perror("webserver (open)");
-            return -1;
-        }
-        valread = write_to_content_string(content_string, &length, file_fd);
-        if(valread == -1)
-        {
-            perror("webserver (write_to_content_string)");
-            return -1;
-        }
-        return write_to_client(file_fd, newsockfd, content_string);
     }
     else
     {
@@ -375,4 +361,22 @@ int write_to_content_string(char *content_string, unsigned long *length, int fil
     }
     content_string[*length] = '\0';
     return 0;
+}
+
+int write_405(int newsockfd, char *content_string, unsigned long *length)
+{
+    ssize_t valread;
+    int     file_fd = open("./resources/405.txt", O_RDONLY | O_CLOEXEC);
+    if(file_fd == -1)
+    {
+        perror("webserver (open)");
+        return -1;
+    }
+    valread = write_to_content_string(content_string, length, file_fd);
+    if(valread == -1)
+    {
+        perror("webserver (write_to_content_string)");
+        return -1;
+    }
+    return write_to_client(file_fd, newsockfd, content_string);
 }
