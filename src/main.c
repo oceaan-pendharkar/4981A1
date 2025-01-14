@@ -15,12 +15,31 @@
 #define HTTP_NOT_FOUND "HTTP/1.0 404 Not Found\r\n"
 
 // TODO: create switch statement and generate dynamically
-#define HTTP_CONTENT_TYPE "Content-Type: text/html\r\n"
+#define HTML_CONTENT_TYPE "Content-Type: text/html\r\n"
+#define TEXT_CONTENT_TYPE "Content-Type: text/plain\r\n"
+#define CSS_CONTENT_TYPE "Content-Type: text/css\r\n"
+#define JS_CONTENT_TYPE "Content-Type: text/javascript\r\n"
+#define JPEG_CONTENT_TYPE "Content-Type: image/jpeg\r\n"
+#define PNG_CONTENT_TYPE "Content-Type: image/png\r\n"
+#define GIF_CONTENT_TYPE "Content-Type: image/gif\r\n"
+#define SWF_CONTENT_TYPE "Content-Type: application/x-shockwave-flash\r\n"
+
 #define REQ_HEADER_LEN 5
 #define PATH_LEN 1024
 #define CONTENT_LEN_BUF 100
 #define TEN 10
 #define LEN_405 9
+#define FILE_EXT_LEN 5
+
+// don't need html because it's the default
+#define JS_EXT "sj"
+#define CSS_EXT "ssc"
+#define JPG_EXT "gpj"
+#define JPEG_EXT "gepj"
+#define PNG_EXT "gnp"
+#define GIF_EXT "fig"
+#define SWF_EXT "fws"
+#define TXT_EXT "txt"
 
 // FILE_PATH_LEN is the length we have to append to include ./resources to the path
 // we want to open the file we're serving at
@@ -28,8 +47,7 @@
 
 // Priorities:
 //  Serve different file types
-//  Handle incorrect requests
-//  Handle GET and HEAD
+//  Handle errors listed on assignment
 //  Implement multiplexing or threads
 
 int  handle_client(int newsockfd, const char *request_path, int is_head);
@@ -44,6 +62,7 @@ void append_body(char *response_string, const char *content_string, unsigned lon
 int  write_to_client(int file_fd, int newsockfd, const char *response_string);
 int  write_to_content_string(char *content_string, unsigned long *length, int file_fd);
 int  write_405(int newsockfd, char *content_string, unsigned long *length);
+void set_content_type_from_file_extension(const char *request_path, char *content_type_string);
 
 int main(int arg, const char *argv[])
 {
@@ -175,6 +194,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
 {
     char          response_string[BUFFER_SIZE];
     char          content_string[BUFFER_SIZE];
+    char          content_type_line[BUFFER_SIZE] = {0};
     int           file_fd;
     int           valread;
     unsigned long length = 0;
@@ -214,13 +234,14 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
     valread = write_to_content_string(content_string, &length, file_fd);
     if(valread == -1)
     {
-        perror("webserver (write http response body)");
+        perror("webserver (http response body)");
         return -1;
     }
 
     // append content type line
-    // only deals with http content type right now
-    strncat(response_string, HTTP_CONTENT_TYPE, strlen(HTTP_CONTENT_TYPE));
+    set_content_type_from_file_extension(request_path, content_type_line);
+    printf("content_type_line: %s\n", content_type_line);
+    strncat(response_string, content_type_line, strlen(content_type_line));
 
     // append content length section (can only do this once we have the body)
     // but must be appended before the body
@@ -388,4 +409,62 @@ int write_405(int newsockfd, char *content_string, unsigned long *length)
         return -1;
     }
     return write_to_client(file_fd, newsockfd, content_string);
+}
+
+void set_content_type_from_file_extension(const char *request_path, char *content_type_string)
+{
+    size_t req_path_i                   = strlen(request_path) - 1;
+    int    file_ext_i                   = 0;
+    char   file_extension[FILE_EXT_LEN] = {0};
+
+    // grab the last chars up to '.' of the request_path
+    printf("request path index: %zu\n", req_path_i);
+    while(request_path[req_path_i] != '.' && req_path_i > 0 && file_ext_i < FILE_EXT_LEN)
+    {
+        file_extension[file_ext_i++] = request_path[req_path_i--];
+    }
+    printf("file_extension: %s\n", file_extension);
+
+    if(strcmp(file_extension, TXT_EXT) == 0)
+    {
+        strncpy(content_type_string, TEXT_CONTENT_TYPE, strlen(TEXT_CONTENT_TYPE));
+        content_type_string[strlen(TEXT_CONTENT_TYPE)] = '\0';
+    }
+    else if(strcmp(file_extension, JS_EXT) == 0)
+    {
+        strncpy(content_type_string, JS_CONTENT_TYPE, strlen(JS_CONTENT_TYPE));
+        content_type_string[strlen(JS_CONTENT_TYPE)] = '\0';
+    }
+    else if(strcmp(file_extension, CSS_EXT) == 0)
+    {
+        strncpy(content_type_string, CSS_CONTENT_TYPE, strlen(CSS_CONTENT_TYPE));
+        content_type_string[strlen(CSS_CONTENT_TYPE)] = '\0';
+    }
+    else if(strcmp(file_extension, JPG_EXT) == 0 || strcmp(file_extension, JPEG_EXT) == 0)
+    {
+        strncpy(content_type_string, JPEG_CONTENT_TYPE, strlen(JPEG_CONTENT_TYPE));
+        content_type_string[strlen(JPEG_CONTENT_TYPE)] = '\0';
+    }
+    else if(strcmp(file_extension, PNG_EXT) == 0)
+    {
+        strncpy(content_type_string, PNG_CONTENT_TYPE, strlen(PNG_CONTENT_TYPE));
+        content_type_string[strlen(PNG_CONTENT_TYPE)] = '\0';
+    }
+    else if(strcmp(file_extension, GIF_EXT) == 0)
+    {
+        strncpy(content_type_string, GIF_CONTENT_TYPE, strlen(GIF_CONTENT_TYPE));
+        content_type_string[strlen(GIF_CONTENT_TYPE)] = '\0';
+    }
+    else if(strcmp(file_extension, SWF_EXT) == 0)
+    {
+        strncpy(content_type_string, SWF_CONTENT_TYPE, strlen(SWF_CONTENT_TYPE));
+        content_type_string[strlen(SWF_CONTENT_TYPE)] = '\0';
+    }
+    else
+    {
+        strncpy(content_type_string, HTML_CONTENT_TYPE, strlen(HTML_CONTENT_TYPE));
+        content_type_string[strlen(HTML_CONTENT_TYPE)] = '\0';
+    }
+
+    printf("set content type header to: %s\n", content_type_string);
 }
