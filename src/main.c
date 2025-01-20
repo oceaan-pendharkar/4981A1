@@ -7,14 +7,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define PORT 8080
 #define BUFFER_SIZE 1024
+
 #define HTTP_OK "HTTP/1.0 200 OK\r\n"
 #define HTTP_NOT_FOUND "HTTP/1.0 404 Not Found\r\n"
+#define HTTP_METHOD_NOT_ALLOWED "HTTP/1.0 405 Method Not Allowed\r\nAllow: GET, HEAD\r\n"
 
-// TODO: create switch statement and generate dynamically
 #define HTML_CONTENT_TYPE "Content-Type: text/html\r\n"
 #define TEXT_CONTENT_TYPE "Content-Type: text/plain\r\n"
 #define CSS_CONTENT_TYPE "Content-Type: text/css\r\n"
@@ -30,6 +32,8 @@
 #define TEN 10
 #define LEN_405 9
 #define FILE_EXT_LEN 5
+#define SIZE_404_MSG 20
+#define INDEX_FILE_PATH "/index.html"
 
 // don't need html because it's the default
 #define JS_EXT "sj"
@@ -55,12 +59,12 @@ int  is_get_request(const char *req_header);
 int  is_head_request(const char *req_header);
 void set_request_path(char *req_path, const char *buffer);
 void int_to_string(char *string, unsigned long n);
-void open_file_at_path(const char *request_path, int *file_fd);
+void open_file_at_path(const char *request_path, int *file_fd, struct stat *file_stats);
 void append_msg_to_response_string(char *response, const char *msg);
 void append_content_length_msg(char *response_string, unsigned long length);
 void append_body(char *response_string, const char *content_string, unsigned long length);
-int  write_to_client(int file_fd, int newsockfd, const char *response_string);
-int  write_to_content_string(char *content_string, unsigned long *length, int file_fd);
+int  write_to_client(int newsockfd, char *response_string);
+int  write_to_content_string(char **content_string, unsigned long *length, const char *file_path);
 int  write_405(int newsockfd, char *content_string, unsigned long *length);
 void set_content_type_from_file_extension(const char *request_path, char *content_type_string);
 
@@ -192,56 +196,76 @@ int main(int arg, const char *argv[])
 
 int handle_client(int newsockfd, const char *request_path, int is_head)
 {
-    char          response_string[BUFFER_SIZE];
-    char          content_string[BUFFER_SIZE];
-    char          content_type_line[BUFFER_SIZE] = {0};
-    int           file_fd;
-    int           valread;
-    unsigned long length = 0;
+    char  *response_string;
+    char  *content_string = {0};
+    char **content_ptr    = &content_string;
+    // TODO: malloc content_type_line
+    char content_type_line[BUFFER_SIZE] = {0};
+    int  valread;
+    // This is the length of content_string/the response body only
+    unsigned long length          = 0;
+    unsigned long response_length = 0;
 
-    if(strcmp(request_path, "/405.txt") == 0)
-    {
-        write_405(newsockfd, content_string, &length);
-        return 0;
-    }
-
-    // get the content of the file with file_fd
-    if(strcmp(request_path, "/") == 0)
-    {
-        file_fd = open("./resources/index.html", O_RDONLY | O_CLOEXEC);
-    }
-    else
-    {
-        open_file_at_path(request_path, &file_fd);
-    }
-    if(file_fd == -1)
-    {
-        // This means the file requested was not found/openable
-        append_msg_to_response_string(response_string, HTTP_NOT_FOUND);
-        file_fd = open("./resources/404.html", O_RDONLY | O_CLOEXEC);
-        if(file_fd == -1)
-        {
-            perror("webserver (open)");
-            return -1;
-        }
-    }
-    else
-    {
-        // This means the file was found so we will return 200
-        append_msg_to_response_string(response_string, HTTP_OK);
-    }
-
-    valread = write_to_content_string(content_string, &length, file_fd);
+    // we malloc the content_string in this function
+    // length also gets set to the length of the body in this function
+    valread = write_to_content_string(content_ptr, &length, request_path);
     if(valread == -1)
     {
         perror("webserver (http response body)");
         return -1;
     }
 
-    // append content type line
-    set_content_type_from_file_extension(request_path, content_type_line);
+    // set content type
+    if(valread == -2)
+    {
+        set_content_type_from_file_extension(".html", content_type_line);
+    }
+    else
+    {
+        set_content_type_from_file_extension(request_path, content_type_line);
+    }
     printf("content_type_line: %s\n", content_type_line);
-    strncat(response_string, content_type_line, strlen(content_type_line));
+
+    // length of response_string = (HTTP HEADER LEN) + content length string length + body length
+    if(valread == -2)
+    {
+        // This means the file requested was not found/openable
+        response_length = strlen(HTTP_NOT_FOUND) + strlen(content_type_line) + CONTENT_LEN_BUF + length;
+        response_string = (char *)malloc(sizeof(char) * (response_length + 1));
+        if(response_string == NULL)
+        {
+            perror("webserver (malloc)");
+            free(content_string);
+            return -3;
+        }
+        append_msg_to_response_string(response_string, HTTP_NOT_FOUND);
+    }
+    else if(strcmp(request_path, "/405.txt") == 0)
+    {
+        response_length = strlen(HTTP_METHOD_NOT_ALLOWED) + strlen(content_type_line) + CONTENT_LEN_BUF + length;
+        response_string = (char *)malloc(sizeof(char) * (response_length + 1));
+        if(response_string == NULL)
+        {
+            perror("webserver (malloc)");
+            free(content_string);
+            return -3;
+        }
+        append_msg_to_response_string(response_string, HTTP_METHOD_NOT_ALLOWED);
+    }
+    else
+    {
+        response_length = strlen(HTTP_OK) + strlen(content_type_line) + CONTENT_LEN_BUF + length;
+        response_string = (char *)malloc(sizeof(char) * (response_length + 1));
+        if(response_string == NULL)
+        {
+            perror("webserver (malloc)");
+            free(content_string);
+            return -3;
+        }
+        append_msg_to_response_string(response_string, HTTP_OK);
+    }
+
+    strncat(response_string, content_type_line, strlen(content_type_line) + 1);
 
     // append content length section (can only do this once we have the body)
     // but must be appended before the body
@@ -250,11 +274,12 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
     // append body section, only if not head request
     if(is_head == 0)
     {
-        append_body(response_string, content_string, length);
+        append_body(response_string, *content_ptr, length);
     }
 
+    free(content_string);
     // write to client
-    return write_to_client(file_fd, newsockfd, response_string);
+    return write_to_client(newsockfd, response_string);
 }
 
 int is_get_request(const char *req_header)
@@ -323,20 +348,23 @@ void int_to_string(char *string, unsigned long n)
     string[digits] = '\0';
 }
 
-void open_file_at_path(const char *request_path, int *file_fd)
+void open_file_at_path(const char *request_path, int *file_fd, struct stat *file_stat)
 {
     char *path = (char *)malloc(sizeof(char) * (strlen(request_path) + FILE_PATH_LEN + 1));
     strncpy(path, "./resources", FILE_PATH_LEN);
     strncpy(path + FILE_PATH_LEN, request_path, strlen(request_path) + 1);
     printf("file path: %s\n", path);
     *file_fd = open(path, O_RDONLY | O_CLOEXEC);
+    stat(path, file_stat);
+    printf("File size of %s: %lld bytes\n", path, file_stat->st_size);
+    printf("File descriptor: %d\n", *file_fd);
     free(path);
 }
 
 void append_msg_to_response_string(char *response, const char *msg)
 {
-    strncpy(response, msg, strlen(msg) - 1);
-    response[strlen(msg) - 1] = '\0';
+    strncpy(response, msg, strlen(msg));
+    response[strlen(msg)] = '\0';
 }
 
 // This one is special because it has the extra \r\n and needs to be constructed with the appropriate length
@@ -347,68 +375,130 @@ void append_content_length_msg(char *response_string, unsigned long length)
     int_to_string(content_len_buffer, length);
     printf("content length: %s\n", content_len_buffer);
     strncat(content_length_msg, content_len_buffer, strlen(content_len_buffer));
-    strncat(content_length_msg, "\r\n\r\n", 4);
+    strncat(content_length_msg, "\r\n\r\n", 5);
     printf("content_length_msg: %s\n", content_length_msg);
-    strncat(response_string, content_length_msg, length + 2);
+    printf("length: %lu\n", length);
+    strncat(response_string, content_length_msg, strlen(content_length_msg) + 1);
     printf("response string: %s\n", response_string);
 }
 
 void append_body(char *response_string, const char *content_string, unsigned long length)
 {
-    strncat(response_string, content_string, length);
-    strncat(response_string, "\r\n", 2);
+    if(content_string != NULL)
+    {
+        strncat(response_string, content_string, length);
+        strncat(response_string, "\r\n", 2);
+    }
 }
 
-int write_to_client(int file_fd, int newsockfd, const char *response_string)
+int write_to_client(int newsockfd, char *response_string)
 {
     ssize_t valwrite;
     valwrite = write(newsockfd, response_string, strlen(response_string));
     if(valwrite < 0)
     {
         perror("webserver (write)");
-        close(file_fd);
+        free(response_string);
         return -1;
     }
-    close(file_fd);
+    free(response_string);
     return 0;
 }
 
-int write_to_content_string(char *content_string, unsigned long *length, int file_fd)
+int write_to_content_string(char **content_string, unsigned long *length, const char *file_path)
 {
-    ssize_t valread;
-    char    c;
-    printf("reading from file\n");
-    while((valread = read(file_fd, &c, 1)) > 0 && c != '\0' && c != EOF)
-    {
-        // write c to response_string
-        content_string[(*length)++] = c;
-    }
-    if(valread < 0)
-    {
-        perror("webserver (read)");
-        close(file_fd);
-        return -1;
-    }
-    content_string[*length] = '\0';
-    return 0;
-}
+    char         c;
+    struct stat  file_stat;
+    struct stat *fileStat = &file_stat;
+    int          file_fd;
+    char        *path;
+    const char  *MSG_404 = "<p>404 NOT FOUND</p>\0";
+    int          retval  = 0;
 
-int write_405(int newsockfd, char *content_string, unsigned long *length)
-{
-    ssize_t valread;
-    int     file_fd = open("./resources/405.txt", O_RDONLY | O_CLOEXEC);
+    if(strcmp(file_path, "/") == 0)
+    {
+        path = (char *)malloc(sizeof(char) * (FILE_PATH_LEN + 1));
+        if(path == NULL)
+        {
+            perror("malloc");
+            return -3;
+        }
+        for(size_t i = 0; i < strlen(INDEX_FILE_PATH); i++)
+        {
+            path[i] = INDEX_FILE_PATH[i];
+        }
+        path[strlen(INDEX_FILE_PATH)] = '\0';
+    }
+    else
+    {
+        path = (char *)malloc(sizeof(char) * (strlen(file_path) + 1));
+        if(path == NULL)
+        {
+            perror("malloc");
+            return -3;
+        }
+        for(size_t i = 0; i < strlen(file_path); i++)
+        {
+            path[i] = file_path[i];
+        }
+        path[strlen(file_path)] = '\0';
+    }
+
+    open_file_at_path(path, &file_fd, fileStat);
+    free(path);
     if(file_fd == -1)
     {
-        perror("webserver (open)");
-        return -1;
+        file_fd = open("./resources/404.html", O_RDONLY | O_CLOEXEC);
+        if(file_fd == -1)
+        {
+            perror("webserver (open: 404 html msg file has been moved or deleted)");
+            *content_string = (char *)malloc((sizeof(char) * SIZE_404_MSG) + 1);
+            if(*content_string == NULL)
+            {
+                perror("webserver (malloc)");
+                close(file_fd);
+                return -3;
+            }
+            for(int i = 0; i <= SIZE_404_MSG; i++)
+            {
+                (*content_string)[i] = MSG_404[i];
+            }
+            close(file_fd);
+            return -2;
+        }
+        if(fileStat->st_size == 0)
+        {
+            fileStat->st_size = SIZE_404_MSG;
+        }
+        retval = -2;
     }
-    valread = write_to_content_string(content_string, length, file_fd);
-    if(valread == -1)
+    printf("filestat st_size: %lld\n", fileStat->st_size);
+
+    *content_string = (char *)malloc(sizeof(char) * ((size_t)fileStat->st_size + 1));
+    if(*content_string == NULL)
     {
-        perror("webserver (write_to_content_string)");
-        return -1;
+        perror("webserver (malloc)");
+        close(file_fd);
+        return -3;
     }
-    return write_to_client(file_fd, newsockfd, content_string);
+    for(int i = 0; i < fileStat->st_size; i++)
+    {
+        ssize_t valread = read(file_fd, &c, sizeof(char));
+        if(valread < 0)
+        {
+            perror("webserver (read content string)");
+            close(file_fd);
+            free(*content_string);
+            return -1;
+        }
+        (*content_string)[i] = c;
+        (*length)++;
+    }
+    printf("content_string: %s\n", *content_string);
+    close(file_fd);
+    // we don't want to free the content_string here because we need it to stay allocated
+    // in order to put it in the response_string in handle_client
+    return retval;
 }
 
 void set_content_type_from_file_extension(const char *request_path, char *content_type_string)
