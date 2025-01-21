@@ -65,7 +65,6 @@ void append_content_length_msg(char *response_string, unsigned long length);
 void append_body(char *response_string, const char *content_string, unsigned long length);
 int  write_to_client(int newsockfd, char *response_string);
 int  write_to_content_string(char **content_string, unsigned long *length, const char *file_path);
-int  write_405(int newsockfd, char *content_string, unsigned long *length);
 void set_content_type_from_file_extension(const char *request_path, char *content_type_string);
 
 int main(int arg, const char *argv[])
@@ -405,6 +404,8 @@ int write_to_client(int newsockfd, char *response_string)
     return 0;
 }
 
+// returns -2 if page isn't found
+// returns -3 if malloc failed
 int write_to_content_string(char **content_string, unsigned long *length, const char *file_path)
 {
     char         c;
