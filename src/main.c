@@ -29,6 +29,7 @@
 #define REQ_HEADER_LEN 5
 #define PATH_LEN 1024
 #define CONTENT_LEN_BUF 100
+#define CONTENT_TERM_LEN 5
 #define TEN 10
 #define LEN_405 9
 #define FILE_EXT_LEN 5
@@ -87,6 +88,8 @@ int main(int arg, const char *argv[])
     printf("socket created successfully\n");
     printf("%d\n", arg);
     printf("%s\n", argv[0]);
+
+    memset(&client_addr, 0, sizeof(client_addr));    // Linux update
 
     // Create the address to bind the socket to
 
@@ -355,7 +358,7 @@ void open_file_at_path(const char *request_path, int *file_fd, struct stat *file
     printf("file path: %s\n", path);
     *file_fd = open(path, O_RDONLY | O_CLOEXEC);
     stat(path, file_stat);
-    printf("File size of %s: %lld bytes\n", path, file_stat->st_size);
+    printf("File size of %s: %ld bytes\n", path, file_stat->st_size);    // Linux update
     printf("File descriptor: %d\n", *file_fd);
     free(path);
 }
@@ -374,7 +377,7 @@ void append_content_length_msg(char *response_string, unsigned long length)
     int_to_string(content_len_buffer, length);
     printf("content length: %s\n", content_len_buffer);
     strncat(content_length_msg, content_len_buffer, strlen(content_len_buffer));
-    strncat(content_length_msg, "\r\n\r\n", 5);
+    strncat(content_length_msg, "\r\n\r\n", CONTENT_TERM_LEN);
     printf("content_length_msg: %s\n", content_length_msg);
     printf("length: %lu\n", length);
     strncat(response_string, content_length_msg, strlen(content_length_msg) + 1);
@@ -473,7 +476,7 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
         }
         retval = -2;
     }
-    printf("filestat st_size: %lld\n", fileStat->st_size);
+    printf("filestat st_size: %ld\n", fileStat->st_size);    // Linux update
 
     *content_string = (char *)malloc(sizeof(char) * ((size_t)fileStat->st_size + 1));
     if(*content_string == NULL)
