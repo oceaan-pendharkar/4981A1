@@ -48,7 +48,13 @@
 
 // FILE_PATH_LEN is the length we have to append to include ./resources to the path
 // we want to open the file we're serving at
-#define FILE_PATH_LEN 11
+#if(defined(__APPLE__) && defined(__MACH__))
+    #define FILE_PATH_LEN 11
+#endif
+
+#if defined(__linux__)
+    #define FILE_PATH_LEN 12
+#endif
 
 // Priorities:
 //  Serve different file types
@@ -70,9 +76,9 @@ void set_content_type_from_file_extension(const char *request_path, char *conten
 
 int main(int arg, const char *argv[])
 {
-    char               buffer[BUFFER_SIZE];		// Buffer for storing incoming data
-    struct sockaddr_in host_addr;				// Server's address structure
-    unsigned int       host_addrlen;			// Length of the server address
+    char               buffer[BUFFER_SIZE];    // Buffer for storing incoming data
+    struct sockaddr_in host_addr;              // Server's address structure
+    unsigned int       host_addrlen;           // Length of the server address
 
     // Create client address
     struct sockaddr_in client_addr;
@@ -95,7 +101,7 @@ int main(int arg, const char *argv[])
     memset(&client_addr, 0, sizeof(client_addr));    // Linux update
 
     // Create the address to bind the socket to
-	// Initialize the server address structure
+    // Initialize the server address structure
     host_addrlen = sizeof(host_addr);
 
     host_addr.sin_family      = AF_INET;
@@ -123,12 +129,12 @@ int main(int arg, const char *argv[])
     // Infinite loop to handle client connections
     while(1)
     {
-        int     sockn;								// Socket for new connection
-        ssize_t valread;							// For read operations
-        ssize_t valwrite;							// For write operations
-        char    req_header[REQ_HEADER_LEN + 1];		// Request the header buffer
-        char    req_path[PATH_LEN];					// Path of the requested file
-        int     is_head = 0;						// Flag to indicate a HEAD request
+        int     sockn;                             // Socket for new connection
+        ssize_t valread;                           // For read operations
+        ssize_t valwrite;                          // For write operations
+        char    req_header[REQ_HEADER_LEN + 1];    // Request the header buffer
+        char    req_path[PATH_LEN];                // Path of the requested file
+        int     is_head = 0;                       // Flag to indicate a HEAD request
 
         // Accept incoming connections
         int newsockfd = accept(sockfd, (struct sockaddr *)&host_addr, (socklen_t *)&host_addrlen);
@@ -215,14 +221,15 @@ is_head: flag indicating whether the HTTP request is a HEAD request
  */
 int handle_client(int newsockfd, const char *request_path, int is_head)
 {
-    char  *response_string;						// The Full HTTP response
-    char  *content_string = {0};				// HTTP response body
-    char **content_ptr    = &content_string;	// Pointer to dynamically allocated resources
+    char  *response_string;                     // The Full HTTP response
+    char  *content_string = {0};                // HTTP response body
+    char **content_ptr    = &content_string;    // Pointer to dynamically allocated resources
     // TODO: malloc content_type_line
-    char content_type_line[BUFFER_SIZE] = {0};	// Content-type header
-    int  valread;								// Result of file read operation
-    unsigned long length          = 0;			// Length of response body
-    unsigned long response_length = 0;			// Total length of HTTP response
+    char          content_type_line[BUFFER_SIZE] = {0};    // Content-type header
+    int           valread;                                 // Result of file read operation
+    unsigned long length          = 0;                     // Length of response body
+    unsigned long response_length = 0;                     // Total length of HTTP response
+    int           result;
 
     // we malloc the content_string in this function
     // length also gets set to the length of the body in this function
@@ -300,13 +307,15 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
 
     // free allocated memory for the body
     free(content_string);
+    result = write_to_client(newsockfd, response_string);
+
     // write to client
-    return write_to_client(newsockfd, response_string);
+    return result;
 }
 
 /*
-	Checks if the header starts with GET
-	req_header: string containing the first part of the HTTP request header
+    Checks if the header starts with GET
+    req_header: string containing the first part of the HTTP request header
  */
 int is_get_request(const char *req_header)
 {
@@ -318,8 +327,8 @@ int is_get_request(const char *req_header)
 }
 
 /*
-	Checks if the header starts with HEAD
-	req_header: string containing the first part of the HTTP request header
+    Checks if the header starts with HEAD
+    req_header: string containing the first part of the HTTP request header
  */
 int is_head_request(const char *req_header)
 {
@@ -331,9 +340,9 @@ int is_head_request(const char *req_header)
 }
 
 /*
-	Extracts the request path from the HTTP request header
-	req_path: pointer to an array where the extracted request path will be stored
-	buffer: String containing the full HTTP request header (HTTP method, req path, other metadata)
+    Extracts the request path from the HTTP request header
+    req_path: pointer to an array where the extracted request path will be stored
+    buffer: String containing the full HTTP request header (HTTP method, req path, other metadata)
  */
 void set_request_path(char *req_path, const char *buffer)
 {
@@ -342,7 +351,7 @@ void set_request_path(char *req_path, const char *buffer)
     int  j = 0;
 
     // Start reading the buffer
-    c      = buffer[i];
+    c = buffer[i];
 
     // Skip characters until the first space (end of HTTP method)
     // This is because header was already confirmed at this point
@@ -399,7 +408,7 @@ void int_to_string(char *string, unsigned long n)
 void open_file_at_path(const char *request_path, int *file_fd, struct stat *file_stat)
 {
     char *path = (char *)malloc(sizeof(char) * (strlen(request_path) + FILE_PATH_LEN + 1));
-    strncpy(path, "./resources", FILE_PATH_LEN);
+    strncpy(path, "../resources", FILE_PATH_LEN);
     strncpy(path + FILE_PATH_LEN, request_path, strlen(request_path) + 1);
     printf("file path: %s\n", path);
     *file_fd = open(path, O_RDONLY | O_CLOEXEC);
