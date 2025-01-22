@@ -70,9 +70,9 @@ void set_content_type_from_file_extension(const char *request_path, char *conten
 
 int main(int arg, const char *argv[])
 {
-    char               buffer[BUFFER_SIZE];
-    struct sockaddr_in host_addr;
-    unsigned int       host_addrlen;
+    char               buffer[BUFFER_SIZE];		// Buffer for storing incoming data
+    struct sockaddr_in host_addr;				// Server's address structure
+    unsigned int       host_addrlen;			// Length of the server address
 
     // Create client address
     struct sockaddr_in client_addr;
@@ -86,20 +86,23 @@ int main(int arg, const char *argv[])
         return 1;
     }
     printf("socket created successfully\n");
+
+    // (Debugging) Print program arguments
     printf("%d\n", arg);
     printf("%s\n", argv[0]);
 
+    // Initialize client address structure to zero
     memset(&client_addr, 0, sizeof(client_addr));    // Linux update
 
     // Create the address to bind the socket to
-
+	// Initialize the server address structure
     host_addrlen = sizeof(host_addr);
 
     host_addr.sin_family      = AF_INET;
     host_addr.sin_port        = htons(PORT);
     host_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    // Bind the socket to the address
+    // Bind the socket to the server address
     if(bind(sockfd, (struct sockaddr *)&host_addr, host_addrlen) != 0)
     {
         perror("webserver (bind)");
@@ -117,14 +120,15 @@ int main(int arg, const char *argv[])
     }
     printf("server listening for connections\n");
 
+    // Infinite loop to handle client connections
     while(1)
     {
-        int     sockn;
-        ssize_t valread;
-        ssize_t valwrite;
-        char    req_header[REQ_HEADER_LEN + 1];
-        char    req_path[PATH_LEN];
-        int     is_head = 0;
+        int     sockn;								// Socket for new connection
+        ssize_t valread;							// For read operations
+        ssize_t valwrite;							// For write operations
+        char    req_header[REQ_HEADER_LEN + 1];		// Request the header buffer
+        char    req_path[PATH_LEN];					// Path of the requested file
+        int     is_head = 0;						// Flag to indicate a HEAD request
 
         // Accept incoming connections
         int newsockfd = accept(sockfd, (struct sockaddr *)&host_addr, (socklen_t *)&host_addrlen);
@@ -157,6 +161,8 @@ int main(int arg, const char *argv[])
         strncpy(req_header, buffer, REQ_HEADER_LEN - 1);
         req_header[REQ_HEADER_LEN] = '\0';
         printf("req_header: %s\n", req_header);
+
+        // determine if it's a valid GET or HEAD request
         if(is_get_request(req_header) < 0 && is_head_request(req_header) < 0)
         {
             strncpy(req_path, "/405.txt", LEN_405);
@@ -170,10 +176,13 @@ int main(int arg, const char *argv[])
         }
         printf("req_path: %s\n", req_path);
 
+        // Mark as a HEAD request
         if(is_head_request(req_header) == 0)
         {
             is_head = 1;
         }
+
+        // Handle the client request
         valwrite = handle_client(newsockfd, req_path, is_head);
         if(valwrite == -1)
         {
@@ -196,17 +205,24 @@ int main(int arg, const char *argv[])
 #pragma GCC diagnostic pop
 }
 
+/*
+Processes an incoming HTTP request from a client, constructing an HTTP response
+and sending it back to the client
+
+newsockfd: socket fd for the client
+request_path: file path requested by the client
+is_head: flag indicating whether the HTTP request is a HEAD request
+ */
 int handle_client(int newsockfd, const char *request_path, int is_head)
 {
-    char  *response_string;
-    char  *content_string = {0};
-    char **content_ptr    = &content_string;
+    char  *response_string;						// The Full HTTP response
+    char  *content_string = {0};				// HTTP response body
+    char **content_ptr    = &content_string;	// Pointer to dynamically allocated resources
     // TODO: malloc content_type_line
-    char content_type_line[BUFFER_SIZE] = {0};
-    int  valread;
-    // This is the length of content_string/the response body only
-    unsigned long length          = 0;
-    unsigned long response_length = 0;
+    char content_type_line[BUFFER_SIZE] = {0};	// Content-type header
+    int  valread;								// Result of file read operation
+    unsigned long length          = 0;			// Length of response body
+    unsigned long response_length = 0;			// Total length of HTTP response
 
     // we malloc the content_string in this function
     // length also gets set to the length of the body in this function
@@ -244,6 +260,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
     }
     else if(strcmp(request_path, "/405.txt") == 0)
     {
+        // The method is unsupported
         response_length = strlen(HTTP_METHOD_NOT_ALLOWED) + strlen(content_type_line) + CONTENT_LEN_BUF + length;
         response_string = (char *)malloc(sizeof(char) * (response_length + 1));
         if(response_string == NULL)
@@ -256,6 +273,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
     }
     else
     {
+        // Request was successful
         response_length = strlen(HTTP_OK) + strlen(content_type_line) + CONTENT_LEN_BUF + length;
         response_string = (char *)malloc(sizeof(char) * (response_length + 1));
         if(response_string == NULL)
@@ -267,23 +285,29 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
         append_msg_to_response_string(response_string, HTTP_OK);
     }
 
+    // Append the content-type header
     strncat(response_string, content_type_line, strlen(content_type_line) + 1);
 
     // append content length section (can only do this once we have the body)
     // but must be appended before the body
     append_content_length_msg(response_string, length);
 
-    // append body section, only if not head request
+    // append body section, only if not a HEAD request
     if(is_head == 0)
     {
         append_body(response_string, *content_ptr, length);
     }
 
+    // free allocated memory for the body
     free(content_string);
     // write to client
     return write_to_client(newsockfd, response_string);
 }
 
+/*
+	Checks if the header starts with GET
+	req_header: string containing the first part of the HTTP request header
+ */
 int is_get_request(const char *req_header)
 {
     if(strcmp(req_header, "GET ") == 0)
@@ -293,6 +317,10 @@ int is_get_request(const char *req_header)
     return -1;
 }
 
+/*
+	Checks if the header starts with HEAD
+	req_header: string containing the first part of the HTTP request header
+ */
 int is_head_request(const char *req_header)
 {
     if(strcmp(req_header, "HEAD") == 0)
@@ -302,23 +330,41 @@ int is_head_request(const char *req_header)
     return -1;
 }
 
+/*
+	Extracts the request path from the HTTP request header
+	req_path: pointer to an array where the extracted request path will be stored
+	buffer: String containing the full HTTP request header (HTTP method, req path, other metadata)
+ */
 void set_request_path(char *req_path, const char *buffer)
 {
     char c;
     int  i = 0;
     int  j = 0;
+
+    // Start reading the buffer
     c      = buffer[i];
+
+    // Skip characters until the first space (end of HTTP method)
+    // This is because header was already confirmed at this point
     while(c != ' ')
     {
         c = buffer[++i];
     }
+
+    // Move past the space to start of request path
     c = buffer[++i];
+
+    // Copy chars from buffer to req_path until next space
     while(c != ' ')
     {
         req_path[j++] = c;
         c             = buffer[++i];
     }
+
+    // Null-terminate req_path
     req_path[j] = '\0';
+
+    // Debug: print the extracted request
     printf("request path: %s\n", req_path);
 }
 
