@@ -15,6 +15,7 @@
 
 #define HTTP_OK "HTTP/1.0 200 OK\r\n"
 #define HTTP_NOT_FOUND "HTTP/1.0 404 Not Found\r\n"
+#define HTTP_BAD_REQUEST "HTTP/1.0 400 Bad Request\r\n"
 #define HTTP_METHOD_NOT_ALLOWED "HTTP/1.0 405 Method Not Allowed\r\nAllow: GET, HEAD\r\n"
 
 #define HTML_CONTENT_TYPE "Content-Type: text/html\r\n"
@@ -26,7 +27,7 @@
 #define GIF_CONTENT_TYPE "Content-Type: image/gif\r\n"
 #define SWF_CONTENT_TYPE "Content-Type: application/x-shockwave-flash\r\n"
 
-#define REQ_HEADER_LEN 5
+#define REQ_HEADER_LEN 8
 #define PATH_LEN 1024
 #define CONTENT_LEN_BUF 100
 #define CONTENT_TERM_LEN 5
@@ -64,6 +65,7 @@
 int  handle_client(int newsockfd, const char *request_path, int is_head);
 int  is_get_request(const char *req_header);
 int  is_head_request(const char *req_header);
+int  is_http_request(const char *req_header, const char *buffer);
 void set_request_path(char *req_path, const char *buffer);
 void int_to_string(char *string, unsigned long n);
 void open_file_at_path(const char *request_path, int *file_fd, struct stat *file_stats);
@@ -73,6 +75,9 @@ void append_body(char *response_string, const char *content_string, unsigned lon
 int  write_to_client(int newsockfd, char *response_string);
 int  write_to_content_string(char **content_string, unsigned long *length, const char *file_path);
 void set_content_type_from_file_extension(const char *request_path, char *content_type_string);
+void set_request_method(char *req_header, const char *buffer);
+int  has_valid_first_line(const char *buffer);
+int  has_valid_headers(const char *buffer);
 
 int main(int arg, const char *argv[])
 {
@@ -137,6 +142,8 @@ int main(int arg, const char *argv[])
         char    req_header[REQ_HEADER_LEN + 1];    // Request the header buffer
         char    req_path[PATH_LEN];                // Path of the requested file
         int     is_head = 0;                       // Flag to indicate a HEAD request
+        int     is_get  = 0;
+        int     is_http = 0;
 
         // Accept incoming connections
         int newsockfd = accept(sockfd, (struct sockaddr *)&host_addr, (socklen_t *)&host_addrlen);
@@ -166,14 +173,31 @@ int main(int arg, const char *argv[])
         printf("buffer: %s\n", buffer);
 
         // check that it is a GET or HEAD request
-        strncpy(req_header, buffer, REQ_HEADER_LEN - 1);
-        req_header[REQ_HEADER_LEN] = '\0';
-        printf("req_header: %s\n", req_header);
+        // read until the space from the buffer
+        set_request_method(req_header, buffer);
+        printf("req_header (method): %s\n", req_header);
 
-        // determine if it's a valid GET or HEAD request
-        if(is_get_request(req_header) < 0 && is_head_request(req_header) < 0)
+        is_head = is_head_request(req_header);
+        printf("is_head: %d\n", is_head);
+
+        is_get = is_get_request(req_header);
+        printf("is_get: %d\n", is_get);
+
+        is_http = is_http_request(req_header, buffer);
+        printf("is_http: %d\n", is_http);
+
+        // if it's not a valid head or get request but it IS a different VALID http request
+        if(is_get < 0 && is_head < 0 && is_http == 0)
         {
+            printf("METHOD NOT ALLOWED: %s\n", req_header);
             strncpy(req_path, "/405.txt", LEN_405);
+            req_path[TEN] = '\0';
+        }
+        // if it's not a valid http request we'll serve back 400 error
+        else if(is_http_request(req_header, buffer) < 0)
+        {
+            printf("gets 400 file path and isn't proper http request\n");
+            strncpy(req_path, "/400.txt", LEN_405);
             req_path[TEN] = '\0';
         }
         else
@@ -280,6 +304,19 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
         }
         append_msg_to_response_string(response_string, HTTP_METHOD_NOT_ALLOWED);
     }
+    else if(strcmp(request_path, "/400.txt") == 0)
+    {
+        // The request is bad
+        response_length = strlen(HTTP_BAD_REQUEST) + strlen(content_type_line) + CONTENT_LEN_BUF + length;
+        response_string = (char *)malloc(sizeof(char) * (response_length + 1));
+        if(response_string == NULL)
+        {
+            perror("webserver (malloc)");
+            free(content_string);
+            return -3;
+        }
+        append_msg_to_response_string(response_string, HTTP_BAD_REQUEST);
+    }
     else
     {
         // Request was successful
@@ -302,7 +339,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
     append_content_length_msg(response_string, length);
 
     // append body section, only if not a HEAD request
-    if(is_head == 0)
+    if(is_head == -1)
     {
         append_body(response_string, *content_ptr, length);
     }
@@ -321,7 +358,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
  */
 int is_get_request(const char *req_header)
 {
-    if(strcmp(req_header, "GET ") == 0)
+    if(strcmp(req_header, "GET") == 0)
     {
         return 0;
     }
@@ -339,6 +376,161 @@ int is_head_request(const char *req_header)
         return 0;
     }
     return -1;
+}
+
+/*
+    Checks if the header contains a legit HTTP request method
+    if not, returns -1
+    if yes, returns 0
+    req_header: string containing first part of HTTP request header
+ */
+int is_http_request(const char *req_header, const char *buffer)
+{
+    int valid_firstline = 0;
+    int valid_headers   = 0;
+    printf("entered is http request\n");
+    if(strcmp(req_header, "GET") != 0 && strcmp(req_header, "HEAD") != 0 && strcmp(req_header, "POST") != 0 && strcmp(req_header, "PUT") != 0 && strcmp(req_header, "DELETE") != 0 && strcmp(req_header, "CONNECT") != 0 && strcmp(req_header, "OPTIONS") != 0 &&
+       strcmp(req_header, "TRACE") != 0 && strcmp(req_header, "PATCH") != 0)
+    {
+        return -1;
+    }
+    printf("checking first line\n");
+    valid_firstline = has_valid_first_line(buffer);
+    printf("valid_firstline: %d\n", valid_firstline);
+
+    printf("checking headers\n");
+    valid_headers = has_valid_headers(buffer);
+    printf("valid_headers: %d\n", valid_headers);
+    if(valid_firstline == -1 || valid_headers == -1)
+    {
+        return -1;
+    }
+    return 0;
+}
+
+/*
+    Checks if the request has a valid first line like METHOD URI HTTP/x{x}\r\n
+    if not, returns -1
+    if yes, returns 0
+    When we use this one, we've already checked that the request has a valid method
+    buffer: the buffer containing the request
+ */
+int has_valid_first_line(const char *buffer)
+{
+    int  i = 0;
+    char c = buffer[i];
+    //    printf("in has valid_first_line\n");
+    while(c != ' ' && i < BUFFER_SIZE)
+    {
+        c = buffer[++i];
+        //        printf("%c", c);
+    }
+    //    printf("found space\n");
+    // will return -1 if there is no URI before HTTP/
+    if(i < BUFFER_SIZE - 4)
+    {
+        if(buffer[i + 1] == 'H' && buffer[i + 2] == 'T' && buffer[i + 3] == 'T' && buffer[i + 4] == 'P' && buffer[i + FILE_EXT_LEN] == '/')
+        {
+            //            printf("no URI found before HTTP/\n");
+            return -1;
+        }
+    }
+    //    printf("looking for next space\n");
+    while(c != ' ' && i < BUFFER_SIZE)
+    {
+        c = buffer[++i];
+        //        printf("%c", c);
+    }
+    if(i < BUFFER_SIZE - 1 && buffer[i + 1] != '/')
+    {
+        //        printf("no slash in first line found\n");
+        return -1;
+    }
+    c = buffer[++i];
+    while(c != ' ' && i < BUFFER_SIZE)
+    {
+        c = buffer[++i];
+    }
+    i++;
+
+    // will return -1 if there is no HTTP/x{x}
+    if(buffer[i] != 'H' || buffer[i + 1] != 'T' || buffer[i + 2] != 'T' || buffer[i + 3] != 'P' || buffer[i + 4] != '/')
+    {
+        //        printf("no \"HTTP/\" found\n");
+        //        printf("%c%c%c%c\n", buffer[i], buffer[i + 1], buffer[i + 2], buffer[i + 3]);
+        return -1;
+    }
+    while(c != '\r')
+    {
+        c = buffer[++i];
+    }
+    // will return -1 if there is no \r\n
+    if(buffer[i + 1] != '\n')
+    {
+        //        printf("no \\r\\n found\n");
+        //        printf("%c\n", c);
+        return -1;
+    }
+    return 0;
+}
+
+/*
+    Checks to make sure headers have colons and end in \r\n\r\n, and each ends with \r\n
+    If they don't returns -1
+    If they do returns 0
+    buffer: holds entire request
+ */
+int has_valid_headers(const char *buffer)
+{
+    int  i              = 0;
+    char c              = buffer[i];
+    int  final_rn_found = -1;
+
+    // go to the first \r\n (which is right before the headers)
+    while(c != '\r' && i < BUFFER_SIZE)
+    {
+        c = buffer[++i];
+    }
+    c = buffer[++i];    // buffer is now \n
+
+    while(final_rn_found == -1 && i < BUFFER_SIZE)
+    {
+        // find a colon
+        while(c != ':' && i < BUFFER_SIZE)
+        {
+            c = buffer[++i];
+        }
+        // make sure there is at least 1 char after the colon
+        c = buffer[i];
+        //        printf("found colon in headers before char: %c\n", c);
+
+        // find the \r\n
+        while(c != '\r' && i < BUFFER_SIZE)
+        {
+            c = buffer[++i];
+        }
+        //        printf("found slash r after colon at position %d: %c\n", i, c);
+        if(buffer[++i] != '\n')
+        {
+            return -1;
+        }
+        // we have already incremeted i one past the \r\n
+
+        // if we don't hit another \r we havent hit the end of the headers
+        if(buffer[++i] != '\r')
+        {
+            //            printf("continuing to the next header\n");
+            continue;
+        }
+
+        if(buffer[i] == '\r' && buffer[i + 1] == '\n')
+        {
+            //            printf("found final r and n at position %d\n", i);
+            final_rn_found = 0;
+        }
+        break;
+    }
+    return final_rn_found;
 }
 
 /*
@@ -366,7 +558,7 @@ void set_request_path(char *req_path, const char *buffer)
     c = buffer[++i];
 
     // Copy chars from buffer to req_path until next space
-    while(c != ' ')
+    while(c != ' ' && j < BUFFER_SIZE)
     {
         req_path[j++] = c;
         c             = buffer[++i];
@@ -377,6 +569,28 @@ void set_request_path(char *req_path, const char *buffer)
 
     // Debug: print the extracted request
     printf("request path: %s\n", req_path);
+}
+
+void set_request_method(char *req_header, const char *buffer)
+{
+    char c;
+    int  i = 0;
+    int  j = 0;
+
+    c = buffer[i];
+    // Copy chars from buffer to req_header until first space
+    while(c != ' ' && j < REQ_HEADER_LEN)
+    {
+        req_header[j++] = c;
+        c               = buffer[++i];
+    }
+
+    // Null-terminate req_header
+    req_header[j] = '\0';
+
+    // Debug: print the extracted request
+    printf("request path: %s\n", req_header);
+    printf("request path length: %d\n", (int)strlen(req_header));
 }
 
 void int_to_string(char *string, unsigned long n)
@@ -410,7 +624,7 @@ void int_to_string(char *string, unsigned long n)
 void open_file_at_path(const char *request_path, int *file_fd, struct stat *file_stat)
 {
     char *path = (char *)malloc(sizeof(char) * (strlen(request_path) + FILE_PATH_LEN + 1));
-    strncpy(path, "../resources", FILE_PATH_LEN);
+    strncpy(path, "./resources", FILE_PATH_LEN);
     strncpy(path + FILE_PATH_LEN, request_path, strlen(request_path) + 1);
     printf("file path: %s\n", path);
     *file_fd = open(path, O_RDONLY | O_CLOEXEC);
@@ -517,6 +731,7 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
     free(path);
     if(file_fd == -1)
     {
+        printf("opening 404 file: %s\n", file_path);
         file_fd = open("./resources/404.html", O_RDONLY | O_CLOEXEC);
         if(file_fd == -1)
         {
@@ -558,8 +773,6 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
         close(file_fd);
         return -3;
     }
-    (*content_string)[fileStat->st_size] = '\0';
-
     for(int i = 0; i < fileStat->st_size; i++)
     {
         ssize_t valread = read(file_fd, &c, sizeof(char));
@@ -573,6 +786,7 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
         (*content_string)[i] = c;
         (*length)++;
     }
+    (*content_string)[(*length)] = '\0';
     printf("content_string: %s\n", *content_string);
     close(file_fd);
     // we don't want to free the content_string here because we need it to stay allocated
