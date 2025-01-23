@@ -2,6 +2,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,24 +62,33 @@
 //  Handle errors listed on assignment
 //  Implement multiplexing or threads
 
-int  handle_client(int newsockfd, const char *request_path, int is_head);
-int  is_get_request(const char *req_header);
-int  is_head_request(const char *req_header);
-void set_request_path(char *req_path, const char *buffer);
-void int_to_string(char *string, unsigned long n);
-void open_file_at_path(const char *request_path, int *file_fd, struct stat *file_stats);
-void append_msg_to_response_string(char *response, const char *msg);
-void append_content_length_msg(char *response_string, unsigned long length);
-void append_body(char *response_string, const char *content_string, unsigned long length);
-int  write_to_client(int newsockfd, char *response_string);
-int  write_to_content_string(char **content_string, unsigned long *length, const char *file_path);
-void set_content_type_from_file_extension(const char *request_path, char *content_type_string);
+typedef struct
+{
+    int              newsockfd;
+    char            *req_path;
+    int              is_head;
+    pthread_mutex_t *mutex;
+} client_params;
+
+void *handle_client(void *arg);
+int   is_get_request(const char *req_header);
+int   is_head_request(const char *req_header);
+void  set_request_path(char *req_path, const char *buffer);
+void  int_to_string(char *string, unsigned long n);
+void  open_file_at_path(const char *request_path, int *file_fd, struct stat *file_stats);
+void  append_msg_to_response_string(char *response, const char *msg);
+void  append_content_length_msg(char *response_string, unsigned long length);
+void  append_body(char *response_string, const char *content_string, unsigned long length);
+int   write_to_client(int newsockfd, char *response_string);
+int   write_to_content_string(char **content_string, unsigned long *length, const char *file_path);
+void  set_content_type_from_file_extension(const char *request_path, char *content_type_string);
 
 int main(int arg, const char *argv[])
 {
     char               buffer[BUFFER_SIZE];    // Buffer for storing incoming data
     struct sockaddr_in host_addr;              // Server's address structure
     unsigned int       host_addrlen;           // Length of the server address
+    pthread_mutex_t    lock;
 
     // Create client address
     struct sockaddr_in client_addr;
@@ -128,15 +138,20 @@ int main(int arg, const char *argv[])
     }
     printf("server listening for connections\n");
 
+    // Initialize the mutex
+    pthread_mutex_init(&lock, NULL);
+
     // Infinite loop to handle client connections
     while(1)
     {
-        int     sockn;                             // Socket for new connection
-        ssize_t valread;                           // For read operations
-        ssize_t valwrite;                          // For write operations
-        char    req_header[REQ_HEADER_LEN + 1];    // Request the header buffer
-        char    req_path[PATH_LEN];                // Path of the requested file
-        int     is_head = 0;                       // Flag to indicate a HEAD request
+        int     sockn;      // Socket for new connection
+        ssize_t valread;    // For read operations
+        // ssize_t        valwrite;                          // For write operations
+        char           req_header[REQ_HEADER_LEN + 1];    // Request the header buffer
+        char           req_path[PATH_LEN];                // Path of the requested file
+        int            is_head = 0;                       // Flag to indicate a HEAD request
+        client_params *params;
+        pthread_t      thread;
 
         // Accept incoming connections
         int newsockfd = accept(sockfd, (struct sockaddr *)&host_addr, (socklen_t *)&host_addrlen);
@@ -190,14 +205,42 @@ int main(int arg, const char *argv[])
             is_head = 1;
         }
 
-        // Handle the client request
-        valwrite = handle_client(newsockfd, req_path, is_head);
-        if(valwrite == -1)
+        // Set up struct for threads
+        params = malloc(sizeof(client_params));
+        if(!params)
         {
+            perror("malloc");
             continue;
         }
+
+        // Assign values for thread parameters
+        params->newsockfd = newsockfd;
+        params->req_path  = req_path;
+        params->is_head   = is_head;
+        params->mutex     = &lock;
+
+        // Handle the client request
+        //        valwrite = handle_client(newsockfd, req_path, is_head);
+        //        if(valwrite == -1)
+        //        {
+        //            continue;
+        //        }
+
+        if(pthread_create(&thread, NULL, handle_client, params) != 0)
+        {
+            perror("Failed to create thread");
+            free(params);
+            close(newsockfd);
+            continue;
+        }
+
+        // Detach the thread to clean up resources automatically
+        pthread_detach(thread);
+
         printf("closing connection\n");
+        free(params);
         close(newsockfd);
+        pthread_mutex_destroy(&lock);
     }
 
 #if defined(__clang__)
@@ -221,17 +264,36 @@ newsockfd: socket fd for the client
 request_path: file path requested by the client
 is_head: flag indicating whether the HTTP request is a HEAD request
  */
-int handle_client(int newsockfd, const char *request_path, int is_head)
+void *handle_client(void *arg)
 {
+    int              newsockfd;
+    const char      *request_path;
+    int              is_head;
+    pthread_mutex_t *mutex;
+    client_params   *params;
+
     char  *response_string;                     // The Full HTTP response
     char  *content_string = {0};                // HTTP response body
     char **content_ptr    = &content_string;    // Pointer to dynamically allocated resources
     // TODO: malloc content_type_line
     char          content_type_line[BUFFER_SIZE] = {0};    // Content-type header
     int           valread;                                 // Result of file read operation
-    unsigned long length          = 0;                     // Length of response body
-    unsigned long response_length = 0;                     // Total length of HTTP response
-    int           result;
+    int           valwrite;
+    unsigned long length          = 0;    // Length of response body
+    unsigned long response_length = 0;    // Total length of HTTP response
+
+    params = (client_params *)arg;
+
+    // Extract the parameters
+    newsockfd    = params->newsockfd;
+    request_path = params->req_path;
+    is_head      = params->is_head;
+    mutex        = params->mutex;
+
+    // Lock the mutex
+    pthread_mutex_lock(mutex);
+
+    printf("Handling client on socket %d with req_path: %s, is_head: %d\n", newsockfd, request_path, is_head);
 
     // we malloc the content_string in this function
     // length also gets set to the length of the body in this function
@@ -239,7 +301,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
     if(valread == -1)
     {
         perror("webserver (http response body)");
-        return -1;
+        return NULL;
     }
 
     // set content type
@@ -263,7 +325,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
         {
             perror("webserver (malloc)");
             free(content_string);
-            return -3;
+            return NULL;
         }
         append_msg_to_response_string(response_string, HTTP_NOT_FOUND);
     }
@@ -276,7 +338,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
         {
             perror("webserver (malloc)");
             free(content_string);
-            return -3;
+            return NULL;
         }
         append_msg_to_response_string(response_string, HTTP_METHOD_NOT_ALLOWED);
     }
@@ -289,7 +351,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
         {
             perror("webserver (malloc)");
             free(content_string);
-            return -3;
+            return NULL;
         }
         append_msg_to_response_string(response_string, HTTP_OK);
     }
@@ -309,10 +371,15 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
 
     // free allocated memory for the body
     free(content_string);
-    result = write_to_client(newsockfd, response_string);
+    valwrite = write_to_client(newsockfd, response_string);
+    if(valwrite == -1)
+    {
+        perror("Did not write to client");
+        return NULL;
+    }
 
-    // write to client
-    return result;
+    pthread_mutex_unlock(mutex);
+    return NULL;
 }
 
 /*
