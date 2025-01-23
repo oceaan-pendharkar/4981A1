@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -84,6 +85,10 @@ int main(int arg, const char *argv[])
     char               buffer[BUFFER_SIZE];    // Buffer for storing incoming data
     struct sockaddr_in host_addr;              // Server's address structure
     unsigned int       host_addrlen;           // Length of the server address
+    fd_set             readfds;
+    size_t             max_clients;
+    int               *client_sockets;
+    int                sd;
 
     // Create client address
     struct sockaddr_in client_addr;
@@ -101,6 +106,9 @@ int main(int arg, const char *argv[])
     // (Debugging) Print program arguments
     printf("%d\n", arg);
     printf("%s\n", argv[0]);
+
+    client_sockets = NULL;
+    max_clients    = 0;
 
 // Initialize client address structure to zero
 #if defined(__linux__)
@@ -136,6 +144,9 @@ int main(int arg, const char *argv[])
     // Infinite loop to handle client connections
     while(1)
     {
+        int     max_fd;
+        int     activity;
+        int     newsockfd;
         int     sockn;                             // Socket for new connection
         ssize_t valread;                           // For read operations
         ssize_t valwrite;                          // For write operations
@@ -145,8 +156,55 @@ int main(int arg, const char *argv[])
         int     is_get  = 0;
         int     is_http = 0;
 
+        // Clear the socket set
+#ifndef __clang_analyzer__
+        FD_ZERO(&readfds);
+#endif
+
+#if defined(__FreeBSD__) && defined(__GNUC__)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
+        // Add the server socket to the set
+        FD_SET(sockfd, &readfds);
+#if defined(__FreeBSD__) && defined(__GNUC__)
+    #pragma GCC diagnostic pop
+#endif
+
+        max_fd = sockfd;
+
+        // Add the client sockets to the set
+        for(size_t i = 0; i < max_clients; i++)
+        {
+            sd = client_sockets[i];
+
+            if(sd > 0)
+            {
+#if defined(__FreeBSD__) && defined(__GNUC__)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
+                FD_SET(sd, &readfds);
+#if defined(__FreeBSD__) && defined(__GNUC__)
+    #pragma GCC diagnostic pop
+#endif
+            }
+            if(sd > max_fd)
+            {
+                max_fd = sd;
+            }
+        }
+
+        activity = select(max_fd + 1, &readfds, NULL, NULL, NULL);
+
+        if(activity < 0)
+        {
+            perror("Select error");
+            exit(EXIT_FAILURE);
+        }
+
         // Accept incoming connections
-        int newsockfd = accept(sockfd, (struct sockaddr *)&host_addr, (socklen_t *)&host_addrlen);
+        newsockfd = accept(sockfd, (struct sockaddr *)&host_addr, (socklen_t *)&host_addrlen);
         if(newsockfd < 0)
         {
             perror("webserver (accept)");
