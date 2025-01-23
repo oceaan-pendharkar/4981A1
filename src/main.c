@@ -97,8 +97,10 @@ int main(int arg, const char *argv[])
     printf("%d\n", arg);
     printf("%s\n", argv[0]);
 
-    // Initialize client address structure to zero
-    memset(&client_addr, 0, sizeof(client_addr));    // Linux update
+// Initialize client address structure to zero
+#if defined(__linux__)
+    memset(&client_addr, 0, sizeof(client_addr));
+#endif
 
     // Create the address to bind the socket to
     // Initialize the server address structure
@@ -413,7 +415,15 @@ void open_file_at_path(const char *request_path, int *file_fd, struct stat *file
     printf("file path: %s\n", path);
     *file_fd = open(path, O_RDONLY | O_CLOEXEC);
     stat(path, file_stat);
-    printf("File size of %s: %ld bytes\n", path, file_stat->st_size);    // Linux update
+
+#if(defined(__APPLE__) && defined(__MACH__))
+    printf("File size of %s: %lld bytes\n", path, file_stat->st_size);
+#endif
+
+#if defined(__linux__)
+    printf("File size of %s: %ld bytes\n", path, file_stat->st_size);
+#endif
+
     printf("File descriptor: %d\n", *file_fd);
     free(path);
 }
@@ -531,15 +541,25 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
         }
         retval = -2;
     }
-    printf("filestat st_size: %ld\n", fileStat->st_size);    // Linux update
+
+#if(defined(__APPLE__) && defined(__MACH__))
+    printf("filestat st_size: %lld\n", fileStat->st_size);
+#endif
+
+#if defined(__linux__)
+    printf("filestat st_size: %ld\n", fileStat->st_size);
+#endif
 
     *content_string = (char *)malloc(sizeof(char) * ((size_t)fileStat->st_size + 1));
+
     if(*content_string == NULL)
     {
         perror("webserver (malloc)");
         close(file_fd);
         return -3;
     }
+    (*content_string)[fileStat->st_size] = '\0';
+
     for(int i = 0; i < fileStat->st_size; i++)
     {
         ssize_t valread = read(file_fd, &c, sizeof(char));
