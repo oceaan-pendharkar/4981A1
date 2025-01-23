@@ -525,7 +525,7 @@ int has_valid_headers(const char *buffer)
 
         if(buffer[i] == '\r' && buffer[i + 1] == '\n')
         {
-            //            printf("found final r and n at position %d\n", i);
+            printf("found final r and n at position %d\n", i);
             final_rn_found = 0;
         }
         break;
