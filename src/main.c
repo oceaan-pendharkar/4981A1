@@ -765,7 +765,14 @@ void int_to_string(char *string, unsigned long n)
 void open_file_at_path(const char *request_path, int *file_fd, struct stat *file_stat)
 {
     char *path = (char *)malloc(sizeof(char) * (strlen(request_path) + FILE_PATH_LEN + 1));
+#if(defined(__APPLE__) && defined(__MACH__))
     strncpy(path, "./resources", FILE_PATH_LEN);
+#endif
+
+#if defined(__linux__)
+    strncpy(path, "../resources", FILE_PATH_LEN);
+#endif
+
     strncpy(path + FILE_PATH_LEN, request_path, strlen(request_path) + 1);
     printf("file path: %s\n", path);
     *file_fd = open(path, O_RDONLY | O_CLOEXEC);
