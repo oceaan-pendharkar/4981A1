@@ -207,9 +207,10 @@ int main(int arg, const char *argv[])
         if(activity < 0)
         {
             perror("Select error");
-            exit(EXIT_FAILURE);
+            continue;
         }
 
+        // New Connection
         if(FD_ISSET(sockfd, &readfds))
 #if defined(__FreeBSD__) && defined(__GNUC__)
     #pragma GCC diagnostic pop
@@ -266,7 +267,7 @@ int main(int arg, const char *argv[])
 #endif
                 // Read from the socket: this is the request
                 valread = read(sd, buffer, BUFFER_SIZE);
-                if(valread < 0)
+                if(valread <= 0)
                 {
                     perror("webserver (read)");
                     close(sd);
@@ -279,58 +280,60 @@ int main(int arg, const char *argv[])
     #pragma GCC diagnostic pop
 #endif
                     client_sockets[i] = 0;
-                    continue;
-                }
-                printf("[%s:%u]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-                printf("buffer: %s\n", buffer);
-
-                // check that it is a GET or HEAD request
-                // read until the space from the buffer
-                set_request_method(req_header, buffer);
-                printf("req_header (method): %s\n", req_header);
-
-                is_head = is_head_request(req_header);
-                printf("is_head: %d\n", is_head);
-
-                is_get = is_get_request(req_header);
-                printf("is_get: %d\n", is_get);
-
-                is_http = is_http_request(req_header, buffer);
-                printf("is_http: %d\n", is_http);
-
-                // if it's not a valid head or get request but it IS a different VALID http request
-                if(is_get < 0 && is_head < 0 && is_http == 0)
-                {
-                    printf("METHOD NOT ALLOWED: %s\n", req_header);
-                    strncpy(req_path, "/405.txt", LEN_405);
-                    req_path[TEN] = '\0';
-                }
-                // if it's not a valid http request we'll serve back 400 error
-                else if(is_http_request(req_header, buffer) < 0)
-                {
-                    printf("gets 400 file path and isn't proper http request\n");
-                    strncpy(req_path, "/400.txt", LEN_405);
-                    req_path[TEN] = '\0';
                 }
                 else
                 {
-                    // gets the substring from the / to the white space from the buffer and put it in req_path
-                    // this is the path of the file the request wants to access
-                    set_request_path(req_path, buffer);
-                }
-                printf("req_path: %s\n", req_path);
+                    printf("[%s:%u]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                    printf("buffer: %s\n", buffer);
 
-                // Mark as a HEAD request
-                if(is_head_request(req_header) == 0)
-                {
-                    is_head = 1;
-                }
+                    // check that it is a GET or HEAD request
+                    // read until the space from the buffer
+                    set_request_method(req_header, buffer);
+                    printf("req_header (method): %s\n", req_header);
 
-                // Handle the client request
-                valwrite = handle_client(sd, req_path, is_head);
-                if(valwrite == -1)
-                {
-                    continue;
+                    is_head = is_head_request(req_header);
+                    printf("is_head: %d\n", is_head);
+
+                    is_get = is_get_request(req_header);
+                    printf("is_get: %d\n", is_get);
+
+                    is_http = is_http_request(req_header, buffer);
+                    printf("is_http: %d\n", is_http);
+
+                    // if it's not a valid head or get request but it IS a different VALID http request
+                    if(is_get < 0 && is_head < 0 && is_http == 0)
+                    {
+                        printf("METHOD NOT ALLOWED: %s\n", req_header);
+                        strncpy(req_path, "/405.txt", LEN_405);
+                        req_path[TEN] = '\0';
+                    }
+                    // if it's not a valid http request we'll serve back 400 error
+                    else if(is_http_request(req_header, buffer) < 0)
+                    {
+                        printf("gets 400 file path and isn't proper http request\n");
+                        strncpy(req_path, "/400.txt", LEN_405);
+                        req_path[TEN] = '\0';
+                    }
+                    else
+                    {
+                        // gets the substring from the / to the white space from the buffer and put it in req_path
+                        // this is the path of the file the request wants to access
+                        set_request_path(req_path, buffer);
+                    }
+                    printf("req_path: %s\n", req_path);
+
+                    // Mark as a HEAD request
+                    if(is_head_request(req_header) == 0)
+                    {
+                        is_head = 1;
+                    }
+
+                    // Handle the client request
+                    valwrite = handle_client(sd, req_path, is_head);
+                    if(valwrite == -1)
+                    {
+                        continue;
+                    }
                 }
             }
         }
