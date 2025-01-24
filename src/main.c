@@ -2,6 +2,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +49,8 @@
 #define SWF_EXT "fws"
 #define TXT_EXT "txt"
 
+static volatile sig_atomic_t exit_flag = 0;    // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
 // FILE_PATH_LEN is the length we have to append to include ./resources to the path
 // we want to open the file we're serving at
 #if(defined(__APPLE__) && defined(__MACH__))
@@ -63,22 +66,24 @@
 //  Handle errors listed on assignment
 //  Implement multiplexing or threads
 
-int  handle_client(int newsockfd, const char *request_path, int is_head);
-int  is_get_request(const char *req_header);
-int  is_head_request(const char *req_header);
-int  is_http_request(const char *req_header, const char *buffer);
-void set_request_path(char *req_path, const char *buffer);
-void int_to_string(char *string, unsigned long n);
-void open_file_at_path(const char *request_path, int *file_fd, struct stat *file_stats);
-void append_msg_to_response_string(char *response, const char *msg);
-void append_content_length_msg(char *response_string, unsigned long length);
-void append_body(char *response_string, const char *content_string, unsigned long length);
-int  write_to_client(int newsockfd, char *response_string);
-int  write_to_content_string(char **content_string, unsigned long *length, const char *file_path);
-void set_content_type_from_file_extension(const char *request_path, char *content_type_string);
-void set_request_method(char *req_header, const char *buffer);
-int  has_valid_first_line(const char *buffer);
-int  has_valid_headers(const char *buffer);
+static void setup_signal_handler(void);
+static void sigint_handler(int signum);
+int         handle_client(int newsockfd, const char *request_path, int is_head);
+int         is_get_request(const char *req_header);
+int         is_head_request(const char *req_header);
+int         is_http_request(const char *req_header, const char *buffer);
+void        set_request_path(char *req_path, const char *buffer);
+void        int_to_string(char *string, unsigned long n);
+void        open_file_at_path(const char *request_path, int *file_fd, struct stat *file_stats);
+void        append_msg_to_response_string(char *response, const char *msg);
+void        append_content_length_msg(char *response_string, unsigned long length);
+void        append_body(char *response_string, const char *content_string, unsigned long length);
+int         write_to_client(int newsockfd, char *response_string);
+int         write_to_content_string(char **content_string, unsigned long *length, const char *file_path);
+void        set_content_type_from_file_extension(const char *request_path, char *content_type_string);
+void        set_request_method(char *req_header, const char *buffer);
+int         has_valid_first_line(const char *buffer);
+int         has_valid_headers(const char *buffer);
 
 int main(int arg, const char *argv[])
 {
@@ -107,6 +112,7 @@ int main(int arg, const char *argv[])
     printf("%d\n", arg);
     printf("%s\n", argv[0]);
 
+    setup_signal_handler();
     client_sockets = NULL;
     max_clients    = 0;
 
@@ -142,7 +148,7 @@ int main(int arg, const char *argv[])
     printf("server listening for connections\n");
 
     // Infinite loop to handle client connections
-    while(1)
+    while(!exit_flag)
     {
         int     max_fd;
         int     activity;
@@ -203,84 +209,136 @@ int main(int arg, const char *argv[])
             exit(EXIT_FAILURE);
         }
 
-        // Accept incoming connections
-        newsockfd = accept(sockfd, (struct sockaddr *)&host_addr, (socklen_t *)&host_addrlen);
-        if(newsockfd < 0)
+        if(FD_ISSET(sockfd, &readfds))
+#if defined(__FreeBSD__) && defined(__GNUC__)
+    #pragma GCC diagnostic pop
+#endif
         {
-            perror("webserver (accept)");
-            continue;
-        }
-        printf("connection accepted\n");
+            int *temp;
+            // Accept incoming connections
+            newsockfd = accept(sockfd, (struct sockaddr *)&host_addr, (socklen_t *)&host_addrlen);
+            if(newsockfd < 0)
+            {
+                perror("webserver (accept)");
+                continue;
+            }
+            printf("connection accepted\n");
 
-        // Get client address
-        sockn = getsockname(newsockfd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addrlen);
-        if(sockn < 0)
-        {
-            perror("webserver (getsockname)");
-            continue;
-        }
+            // Increase the size of the client_sockets array
+            max_clients++;
+            temp = (int *)realloc(client_sockets, sizeof(int) * max_clients);
 
-        // Read from the socket: this is the request
-        valread = read(newsockfd, buffer, BUFFER_SIZE);
-        if(valread < 0)
-        {
-            perror("webserver (read)");
-            continue;
-        }
-        printf("[%s:%u]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-        printf("buffer: %s\n", buffer);
+            if(temp == NULL)
+            {
+                perror("realloc");
+                free(client_sockets);
+                exit(EXIT_FAILURE);
+            }
+            else
+            {
+                client_sockets                  = temp;
+                client_sockets[max_clients - 1] = newsockfd;
+            }
 
-        // check that it is a GET or HEAD request
-        // read until the space from the buffer
-        set_request_method(req_header, buffer);
-        printf("req_header (method): %s\n", req_header);
-
-        is_head = is_head_request(req_header);
-        printf("is_head: %d\n", is_head);
-
-        is_get = is_get_request(req_header);
-        printf("is_get: %d\n", is_get);
-
-        is_http = is_http_request(req_header, buffer);
-        printf("is_http: %d\n", is_http);
-
-        // if it's not a valid head or get request but it IS a different VALID http request
-        if(is_get < 0 && is_head < 0 && is_http == 0)
-        {
-            printf("METHOD NOT ALLOWED: %s\n", req_header);
-            strncpy(req_path, "/405.txt", LEN_405);
-            req_path[TEN] = '\0';
-        }
-        // if it's not a valid http request we'll serve back 400 error
-        else if(is_http_request(req_header, buffer) < 0)
-        {
-            printf("gets 400 file path and isn't proper http request\n");
-            strncpy(req_path, "/400.txt", LEN_405);
-            req_path[TEN] = '\0';
-        }
-        else
-        {
-            // gets the substring from the / to the white space from the buffer and put it in req_path
-            // this is the path of the file the request wants to access
-            set_request_path(req_path, buffer);
-        }
-        printf("req_path: %s\n", req_path);
-
-        // Mark as a HEAD request
-        if(is_head_request(req_header) == 0)
-        {
-            is_head = 1;
+            // Get client address
+            sockn = getsockname(newsockfd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addrlen);
+            if(sockn < 0)
+            {
+                perror("webserver (getsockname)");
+                continue;
+            }
         }
 
-        // Handle the client request
-        valwrite = handle_client(newsockfd, req_path, is_head);
-        if(valwrite == -1)
+        // Handle incoming data from existing clients
+        for(size_t i = 0; i < max_clients; i++)
         {
-            continue;
+            sd = client_sockets[i];
+
+#if defined(__FreeBSD__) && defined(__GNUC__)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
+            if(FD_ISSET(sd, &readfds))
+            {
+#if defined(__FreeBSD__) && defined(__GNUC__)
+    #pragma GCC diagnostic pop
+#endif
+                // Read from the socket: this is the request
+                valread = read(sd, buffer, BUFFER_SIZE);
+                if(valread < 0)
+                {
+                    perror("webserver (read)");
+                    close(sd);
+#if defined(__FreeBSD__) && defined(__GNUC__)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
+                    FD_CLR(sd, &readfds);    // Remove the closed socket from the set
+#if defined(__FreeBSD__) && defined(__GNUC__)
+    #pragma GCC diagnostic pop
+#endif
+                    client_sockets[i] = 0;
+                    continue;
+                }
+                printf("[%s:%u]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                printf("buffer: %s\n", buffer);
+
+                // check that it is a GET or HEAD request
+                // read until the space from the buffer
+                set_request_method(req_header, buffer);
+                printf("req_header (method): %s\n", req_header);
+
+                is_head = is_head_request(req_header);
+                printf("is_head: %d\n", is_head);
+
+                is_get = is_get_request(req_header);
+                printf("is_get: %d\n", is_get);
+
+                is_http = is_http_request(req_header, buffer);
+                printf("is_http: %d\n", is_http);
+
+                // if it's not a valid head or get request but it IS a different VALID http request
+                if(is_get < 0 && is_head < 0 && is_http == 0)
+                {
+                    printf("METHOD NOT ALLOWED: %s\n", req_header);
+                    strncpy(req_path, "/405.txt", LEN_405);
+                    req_path[TEN] = '\0';
+                }
+                // if it's not a valid http request we'll serve back 400 error
+                else if(is_http_request(req_header, buffer) < 0)
+                {
+                    printf("gets 400 file path and isn't proper http request\n");
+                    strncpy(req_path, "/400.txt", LEN_405);
+                    req_path[TEN] = '\0';
+                }
+                else
+                {
+                    // gets the substring from the / to the white space from the buffer and put it in req_path
+                    // this is the path of the file the request wants to access
+                    set_request_path(req_path, buffer);
+                }
+                printf("req_path: %s\n", req_path);
+
+                // Mark as a HEAD request
+                if(is_head_request(req_header) == 0)
+                {
+                    is_head = 1;
+                }
+
+                // Handle the client request
+                valwrite = handle_client(sd, req_path, is_head);
+                if(valwrite == -1)
+                {
+                    continue;
+                }
+            }
         }
-        printf("closing connection\n");
-        close(newsockfd);
     }
+
+    free(client_sockets);
+    close(sockfd);
+
+    printf("closing connection\n");
 
 #if defined(__clang__)
     #pragma GCC diagnostic push
@@ -294,6 +352,31 @@ int main(int arg, const char *argv[])
 
 #pragma GCC diagnostic pop
 }
+
+static void setup_signal_handler(void)
+{
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+#if defined(__clang__)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdisabled-macro-expansion"
+#endif
+    sa.sa_handler = sigint_handler;
+#if defined(__clang__)
+    #pragma clang diagnostic pop
+#endif
+    sigaction(SIGINT, &sa, NULL);
+}
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+
+static void sigint_handler(int signum)
+{
+    exit_flag = 1;
+}
+
+#pragma GCC diagnostic pop
 
 /*
 Processes an incoming HTTP request from a client, constructing an HTTP response
