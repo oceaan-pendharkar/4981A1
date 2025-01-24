@@ -84,6 +84,7 @@ void        set_content_type_from_file_extension(const char *request_path, char 
 void        set_request_method(char *req_header, const char *buffer);
 int         has_valid_first_line(const char *buffer);
 int         has_valid_headers(const char *buffer);
+static void socket_close(int sockfd);
 
 int main(int arg, const char *argv[])
 {
@@ -332,6 +333,17 @@ int main(int arg, const char *argv[])
                     continue;
                 }
             }
+        }
+    }
+
+    // Cleanup and close all client sockets
+    for(size_t i = 0; i < max_clients; i++)
+    {
+        sd = client_sockets[i];
+
+        if(sd > 0)
+        {
+            socket_close(sd);
         }
     }
 
@@ -998,4 +1010,13 @@ void set_content_type_from_file_extension(const char *request_path, char *conten
     }
 
     printf("set content type header to: %s\n", content_type_string);
+}
+
+static void socket_close(int sockfd)
+{
+    if(close(sockfd) == -1)
+    {
+        perror("Error closing socket");
+        exit(EXIT_FAILURE);
+    }
 }
