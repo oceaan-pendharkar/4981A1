@@ -1,90 +1,4 @@
-// ./steps/step007.c
-#include <arpa/inet.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <signal.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
-#define PORT 8080
-#define BUFFER_SIZE 1024
-
-#define HTTP_OK "HTTP/1.0 200 OK\r\n"
-#define HTTP_NOT_FOUND "HTTP/1.0 404 Not Found\r\n"
-#define HTTP_BAD_REQUEST "HTTP/1.0 400 Bad Request\r\n"
-#define HTTP_METHOD_NOT_ALLOWED "HTTP/1.0 405 Method Not Allowed\r\nAllow: GET, HEAD\r\n"
-
-#define HTML_CONTENT_TYPE "Content-Type: text/html\r\n"
-#define TEXT_CONTENT_TYPE "Content-Type: text/plain\r\n"
-#define CSS_CONTENT_TYPE "Content-Type: text/css\r\n"
-#define JS_CONTENT_TYPE "Content-Type: text/javascript\r\n"
-#define JPEG_CONTENT_TYPE "Content-Type: image/jpeg\r\n"
-#define PNG_CONTENT_TYPE "Content-Type: image/png\r\n"
-#define GIF_CONTENT_TYPE "Content-Type: image/gif\r\n"
-#define SWF_CONTENT_TYPE "Content-Type: application/x-shockwave-flash\r\n"
-
-#define REQ_HEADER_LEN 8
-#define PATH_LEN 1024
-#define CONTENT_LEN_BUF 100
-#define CONTENT_TERM_LEN 5
-#define TEN 10
-#define LEN_405 9
-#define FILE_EXT_LEN 5
-#define SIZE_404_MSG 20
-#define INDEX_FILE_PATH "/index.html"
-
-// don't need html because it's the default
-#define JS_EXT "sj"
-#define CSS_EXT "ssc"
-#define JPG_EXT "gpj"
-#define JPEG_EXT "gepj"
-#define PNG_EXT "gnp"
-#define GIF_EXT "fig"
-#define SWF_EXT "fws"
-#define TXT_EXT "txt"
-
-static volatile sig_atomic_t exit_flag = 0;    // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-
-// FILE_PATH_LEN is the length we have to append to include ./resources to the path
-// we want to open the file we're serving at
-#if(defined(__APPLE__) && defined(__MACH__))
-    #define FILE_PATH_LEN 11
-#endif
-
-#if defined(__linux__)
-    #define FILE_PATH_LEN 12
-#endif
-
-// Priorities:
-//  Serve different file types
-//  Handle errors listed on assignment
-//  Implement multiplexing or threads
-
-static void setup_signal_handler(void);
-static void sigint_handler(int signum);
-int         handle_client(int newsockfd, const char *request_path, int is_head);
-int         is_get_request(const char *req_header);
-int         is_head_request(const char *req_header);
-int         is_http_request(const char *req_header, const char *buffer);
-void        set_request_path(char *req_path, const char *buffer);
-void        int_to_string(char *string, unsigned long n);
-void        open_file_at_path(const char *request_path, int *file_fd, struct stat *file_stats);
-void        append_msg_to_response_string(char *response, const char *msg);
-void        append_content_length_msg(char *response_string, unsigned long length);
-void        append_body(char *response_string, const char *content_string, unsigned long length);
-int         write_to_client(int newsockfd, char *response_string);
-int         write_to_content_string(char **content_string, unsigned long *length, const char *file_path);
-void        set_content_type_from_file_extension(const char *request_path, char *content_type_string);
-void        set_request_method(char *req_header, const char *buffer);
-int         has_valid_first_line(const char *buffer);
-int         has_valid_headers(const char *buffer);
-static void socket_close(int sockfd);
+#include "main.h"
 
 int main(int arg, const char *argv[])
 {
@@ -408,6 +322,153 @@ static void sigint_handler(int signum)
 #pragma GCC diagnostic pop
 
 /*
+    Extracts the HTTP method from the request header
+
+    @param
+    req_header: Pointer to an array where the extracted HTTP method will be stored
+    buffer: String containing the full HTTP request header
+ */
+void set_request_method(char *req_header, const char *buffer)
+{
+    char c;
+    int  i = 0;
+    int  j = 0;
+
+    // Read the buffer
+    c = buffer[i];
+
+    // Copy chars from buffer to req_header until first space
+    while(c != ' ' && j < REQ_HEADER_LEN)
+    {
+        req_header[j++] = c;
+        c               = buffer[++i];
+    }
+
+    // Null-terminate req_header
+    req_header[j] = '\0';
+
+    // Debug: print the extracted request
+    printf("request path: %s\n", req_header);
+    printf("request path length: %d\n", (int)strlen(req_header));
+}
+
+/*
+    Checks if the header starts with HEAD
+
+    @param
+    req_header: string containing the first part of the HTTP request header
+
+    @return
+    0: The header starts with HEAD
+    -1: The header does not start with HEAD
+ */
+int is_head_request(const char *req_header)
+{
+    if(strcmp(req_header, "HEAD") == 0)
+    {
+        return 0;
+    }
+    return -1;
+}
+
+/*
+    Checks if the header starts with GET
+
+    @param
+    req_header: string containing the first part of the HTTP request header
+
+    @return
+    0: The header starts with GET
+    -1: The header does not start with GET
+ */
+int is_get_request(const char *req_header)
+{
+    if(strcmp(req_header, "GET") == 0)
+    {
+        return 0;
+    }
+    return -1;
+}
+
+/*
+    Checks if the header contains a valid HTTP request method
+
+    @param
+    req_header: string containing first part of HTTP request header
+    buffer: A string containing the full HTTP request
+
+    @return
+    0: The buffer contains a valid HTTP request
+    -1: The buffer does not contain a valid HTTP request
+ */
+int is_http_request(const char *req_header, const char *buffer)
+{
+    int valid_firstline = 0;
+    int valid_headers   = 0;
+    // printf("entered is http request\n");
+
+    // Check if the method in req_header is a valid HTTP method
+    if(strcmp(req_header, "GET") != 0 && strcmp(req_header, "HEAD") != 0 && strcmp(req_header, "POST") != 0 && strcmp(req_header, "PUT") != 0 && strcmp(req_header, "DELETE") != 0 && strcmp(req_header, "CONNECT") != 0 && strcmp(req_header, "OPTIONS") != 0 &&
+       strcmp(req_header, "TRACE") != 0 && strcmp(req_header, "PATCH") != 0)
+    {
+        return -1;
+    }
+
+    // Check if the first line is valid
+    valid_firstline = has_valid_first_line(buffer);
+    // printf("valid_firstline: %d\n", valid_firstline);
+
+    // Check if the headers are valid
+    valid_headers = has_valid_headers(buffer);
+    // printf("valid_headers: %d\n", valid_headers);
+    if(valid_firstline == -1 || valid_headers == -1)
+    {
+        return -1;
+    }
+    return 0;
+}
+
+/*
+    Extracts the request path from the HTTP request header
+
+    @param
+    req_path: pointer to an array where the extracted request path will be stored
+    buffer: String containing the full HTTP request header (HTTP method, req path, other metadata)
+ */
+void set_request_path(char *req_path, const char *buffer)
+{
+    char c;
+    int  i = 0;
+    int  j = 0;
+
+    // Start reading the buffer
+    c = buffer[i];
+
+    // Skip characters until the first space (end of HTTP method)
+    // This is because header was already confirmed at this point
+    while(c != ' ')
+    {
+        c = buffer[++i];
+    }
+
+    // Move past the space to start of request path
+    c = buffer[++i];
+
+    // Copy chars from buffer to req_path until next space
+    while(c != ' ' && j < BUFFER_SIZE)
+    {
+        req_path[j++] = c;
+        c             = buffer[++i];
+    }
+
+    // Null-terminate req_path
+    req_path[j] = '\0';
+
+    // Debug: print the extracted request
+    printf("request path: %s\n", req_path);
+}
+
+/*
     Processes an incoming HTTP request from a client, constructing an HTTP response
     and sending it back to the client
 
@@ -530,79 +591,18 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
 }
 
 /*
-    Checks if the header starts with GET
+    Closes a socket
 
     @param
-    req_header: string containing the first part of the HTTP request header
-
-    @return
-    0: The header starts with GET
-    -1: The header does not start with GET
+    sockfd: The file descriptor of the socket to close
  */
-int is_get_request(const char *req_header)
+static void socket_close(int sockfd)
 {
-    if(strcmp(req_header, "GET") == 0)
+    if(close(sockfd) == -1)
     {
-        return 0;
+        perror("Error closing socket");
+        exit(EXIT_FAILURE);
     }
-    return -1;
-}
-
-/*
-    Checks if the header starts with HEAD
-
-    @param
-    req_header: string containing the first part of the HTTP request header
-
-    @return
-    0: The header starts with HEAD
-    -1: The header does not start with HEAD
- */
-int is_head_request(const char *req_header)
-{
-    if(strcmp(req_header, "HEAD") == 0)
-    {
-        return 0;
-    }
-    return -1;
-}
-
-/*
-    Checks if the header contains a valid HTTP request method
-
-    @param
-    req_header: string containing first part of HTTP request header
-    buffer: A string containing the full HTTP request
-
-    @return
-    0: The buffer contains a valid HTTP request
-    -1: The buffer does not contain a valid HTTP request
- */
-int is_http_request(const char *req_header, const char *buffer)
-{
-    int valid_firstline = 0;
-    int valid_headers   = 0;
-    // printf("entered is http request\n");
-
-    // Check if the method in req_header is a valid HTTP method
-    if(strcmp(req_header, "GET") != 0 && strcmp(req_header, "HEAD") != 0 && strcmp(req_header, "POST") != 0 && strcmp(req_header, "PUT") != 0 && strcmp(req_header, "DELETE") != 0 && strcmp(req_header, "CONNECT") != 0 && strcmp(req_header, "OPTIONS") != 0 &&
-       strcmp(req_header, "TRACE") != 0 && strcmp(req_header, "PATCH") != 0)
-    {
-        return -1;
-    }
-
-    // Check if the first line is valid
-    valid_firstline = has_valid_first_line(buffer);
-    // printf("valid_firstline: %d\n", valid_firstline);
-
-    // Check if the headers are valid
-    valid_headers = has_valid_headers(buffer);
-    // printf("valid_headers: %d\n", valid_headers);
-    if(valid_firstline == -1 || valid_headers == -1)
-    {
-        return -1;
-    }
-    return 0;
 }
 
 /*
@@ -756,248 +756,6 @@ int has_valid_headers(const char *buffer)
 }
 
 /*
-    Extracts the request path from the HTTP request header
-
-    @param
-    req_path: pointer to an array where the extracted request path will be stored
-    buffer: String containing the full HTTP request header (HTTP method, req path, other metadata)
- */
-void set_request_path(char *req_path, const char *buffer)
-{
-    char c;
-    int  i = 0;
-    int  j = 0;
-
-    // Start reading the buffer
-    c = buffer[i];
-
-    // Skip characters until the first space (end of HTTP method)
-    // This is because header was already confirmed at this point
-    while(c != ' ')
-    {
-        c = buffer[++i];
-    }
-
-    // Move past the space to start of request path
-    c = buffer[++i];
-
-    // Copy chars from buffer to req_path until next space
-    while(c != ' ' && j < BUFFER_SIZE)
-    {
-        req_path[j++] = c;
-        c             = buffer[++i];
-    }
-
-    // Null-terminate req_path
-    req_path[j] = '\0';
-
-    // Debug: print the extracted request
-    printf("request path: %s\n", req_path);
-}
-
-/*
-    Extracts the HTTP method from the request header
-
-    @param
-    req_header: Pointer to an array where the extracted HTTP method will be stored
-    buffer: String containing the full HTTP request header
- */
-void set_request_method(char *req_header, const char *buffer)
-{
-    char c;
-    int  i = 0;
-    int  j = 0;
-
-    // Read the buffer
-    c = buffer[i];
-
-    // Copy chars from buffer to req_header until first space
-    while(c != ' ' && j < REQ_HEADER_LEN)
-    {
-        req_header[j++] = c;
-        c               = buffer[++i];
-    }
-
-    // Null-terminate req_header
-    req_header[j] = '\0';
-
-    // Debug: print the extracted request
-    printf("request path: %s\n", req_header);
-    printf("request path length: %d\n", (int)strlen(req_header));
-}
-
-/*
-    Converts an integer into a string
-
-    @param
-    string: Where the converted value will be stored
-    n: The number to be converted
- */
-void int_to_string(char *string, unsigned long n)
-{
-    char          buffer[TEN] = {0};
-    int           digits      = 0;
-    unsigned long i           = n;
-
-    // If n is zero
-    if(n == 0)
-    {
-        string[0] = '0';
-        string[1] = '\0';
-        return;
-    }
-
-    // Extract digits and store them in reverse order
-    while(i > 0)
-    {
-        buffer[digits++] = (char)((i % TEN) + '0');
-        i                = i / TEN;
-        printf("%lu\n", i);
-    }
-    printf("digits: %d\n", digits);
-
-    // Reverse the order of the digits in the buffer
-    for(int j = 0; j < digits; j++)
-    {
-        string[j] = buffer[digits - j - 1];
-    }
-    string[digits] = '\0';
-}
-
-/*
-    Opens a file at the specified path and retrieves its file descriptor and metadata
-
-    @param
-    request_path: The path of the file to open
-    file_fd: Stores the file descriptor of the file
-    file_state: Stores the file's metadata
- */
-void open_file_at_path(const char *request_path, int *file_fd, struct stat *file_stat)
-{
-    // Allocate memory for the file path
-    char *path = (char *)malloc(sizeof(char) * (strlen(request_path) + FILE_PATH_LEN + 1));
-
-    // Set the base directory
-#if(defined(__APPLE__) && defined(__MACH__))
-    strncpy(path, "./resources", FILE_PATH_LEN);
-#endif
-
-#if defined(__linux__)
-    strncpy(path, "../resources", FILE_PATH_LEN);
-#endif
-
-    // Append the requested file path
-    strncpy(path + FILE_PATH_LEN, request_path, strlen(request_path) + 1);
-    printf("file path: %s\n", path);
-
-    // Open the file and store the file descriptor
-    *file_fd = open(path, O_RDONLY | O_CLOEXEC);
-
-    // Retrieve the file metadata
-    stat(path, file_stat);
-
-#if(defined(__APPLE__) && defined(__MACH__))
-    printf("File size of %s: %lld bytes\n", path, file_stat->st_size);
-#endif
-
-#if defined(__linux__)
-    printf("File size of %s: %ld bytes\n", path, file_stat->st_size);
-#endif
-
-    printf("File descriptor: %d\n", *file_fd);
-
-    // Free the allocated memory
-    free(path);
-}
-
-/*
-    Appends a message to the response string
-
-    @param
-    response: Where the message will be appended
-    msg: The message to be copied
- */
-void append_msg_to_response_string(char *response, const char *msg)
-{
-    strncpy(response, msg, strlen(msg));
-    response[strlen(msg)] = '\0';
-}
-
-/*
-    Appends a Content-Length header to the HTTP response string
-    This one is special because it has the extra \r\n and needs to be constructed with the appropriate length
-
-    @param
-    response_string: Where the content-length will be appended
-    length: Length of the HTTP body
- */
-void append_content_length_msg(char *response_string, unsigned long length)
-{
-    char content_len_buffer[CONTENT_LEN_BUF];
-    char content_length_msg[BUFFER_SIZE] = "Content-Length: ";
-
-    // Convert the length value to a string and store it in content_len_buffer
-    int_to_string(content_len_buffer, length);
-    printf("content length: %s\n", content_len_buffer);
-
-    // Append the length
-    strncat(content_length_msg, content_len_buffer, strlen(content_len_buffer));
-
-    // Append a trailing CRLF sequence
-    strncat(content_length_msg, "\r\n\r\n", CONTENT_TERM_LEN);
-
-    printf("content_length_msg: %s\n", content_length_msg);
-    printf("length: %lu\n", length);
-
-    // Append the content-length header
-    strncat(response_string, content_length_msg, strlen(content_length_msg) + 1);
-
-    printf("response string: %s\n", response_string);
-}
-
-/*
-    Appends the body and a trailing CRLF sequence to the HTTP response string
-
-    @param
-    response_string: Contains the HTTP response
-    content_string: The body content to be appended
-    length: The length of the string to be appended
-*/
-void append_body(char *response_string, const char *content_string, unsigned long length)
-{
-    if(content_string != NULL)
-    {
-        strncat(response_string, content_string, length);
-        strncat(response_string, "\r\n", 2);
-    }
-}
-
-/*
-    Sends the HTTP response to the client
-
-    @param
-    newsockfd: The client's socket file descriptor
-    response_string: The HTTP response string to be sent
-
-    @return
-    0: Response successfully sent
-    -1: An error occurred while writing to the socket
- */
-int write_to_client(int newsockfd, char *response_string)
-{
-    ssize_t valwrite;
-    valwrite = write(newsockfd, response_string, strlen(response_string));
-    if(valwrite < 0)
-    {
-        perror("webserver (write)");
-        free(response_string);
-        return -1;
-    }
-    free(response_string);
-    return 0;
-}
-
-/*
     Reads the content of a file at the specified path and writes it to a string
 
     @param
@@ -1013,13 +771,13 @@ int write_to_client(int newsockfd, char *response_string)
  */
 int write_to_content_string(char **content_string, unsigned long *length, const char *file_path)
 {
-    char         c;                                    // Temp character for read functions
-    struct stat  file_stat;                            // Holds file metadata
-    struct stat *fileStat = &file_stat;                // Pointer to file metadata
-    int          file_fd;                              // File descriptor for the file
-    char        *path;                                // String that will store the file path
-    const char  *MSG_404 = "<p>404 NOT FOUND</p>\0";   // 404 error message
-    int          retval  = 0;                        // Return value
+    char         c;                                     // Temp character for read functions
+    struct stat  file_stat;                             // Holds file metadata
+    struct stat *fileStat = &file_stat;                 // Pointer to file metadata
+    int          file_fd;                               // File descriptor for the file
+    char        *path;                                  // String that will store the file path
+    const char  *MSG_404 = "<p>404 NOT FOUND</p>\0";    // 404 error message
+    int          retval  = 0;                           // Return value
 
     // Check if the requested file path is "/"
     if(strcmp(file_path, "/") == 0)
@@ -1140,6 +898,31 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
 }
 
 /*
+    Sends the HTTP response to the client
+
+    @param
+    newsockfd: The client's socket file descriptor
+    response_string: The HTTP response string to be sent
+
+    @return
+    0: Response successfully sent
+    -1: An error occurred while writing to the socket
+ */
+int write_to_client(int newsockfd, char *response_string)
+{
+    ssize_t valwrite;
+    valwrite = write(newsockfd, response_string, strlen(response_string));
+    if(valwrite < 0)
+    {
+        perror("webserver (write)");
+        free(response_string);
+        return -1;
+    }
+    free(response_string);
+    return 0;
+}
+
+/*
     Sets the content-type header based on the file extension in the requested path
 
     @param
@@ -1190,11 +973,6 @@ void set_content_type_from_file_extension(const char *request_path, char *conten
         strncpy(content_type_string, GIF_CONTENT_TYPE, strlen(GIF_CONTENT_TYPE));
         content_type_string[strlen(GIF_CONTENT_TYPE)] = '\0';
     }
-    else if(strcmp(file_extension, SWF_EXT) == 0)
-    {
-        strncpy(content_type_string, SWF_CONTENT_TYPE, strlen(SWF_CONTENT_TYPE));
-        content_type_string[strlen(SWF_CONTENT_TYPE)] = '\0';
-    }
     else
     {
         strncpy(content_type_string, HTML_CONTENT_TYPE, strlen(HTML_CONTENT_TYPE));
@@ -1205,16 +983,147 @@ void set_content_type_from_file_extension(const char *request_path, char *conten
 }
 
 /*
-    Closes a socket
+    Appends a message to the response string
 
     @param
-    sockfd: The file descriptor of the socket to close
+    response: Where the message will be appended
+    msg: The message to be copied
  */
-static void socket_close(int sockfd)
+void append_msg_to_response_string(char *response, const char *msg)
 {
-    if(close(sockfd) == -1)
+    strncpy(response, msg, strlen(msg));
+    response[strlen(msg)] = '\0';
+}
+
+/*
+    Appends a Content-Length header to the HTTP response string
+    This one is special because it has the extra \r\n and needs to be constructed with the appropriate length
+
+    @param
+    response_string: Where the content-length will be appended
+    length: Length of the HTTP body
+ */
+void append_content_length_msg(char *response_string, unsigned long length)
+{
+    char content_len_buffer[CONTENT_LEN_BUF];
+    char content_length_msg[BUFFER_SIZE] = "Content-Length: ";
+
+    // Convert the length value to a string and store it in content_len_buffer
+    int_to_string(content_len_buffer, length);
+    printf("content length: %s\n", content_len_buffer);
+
+    // Append the length
+    strncat(content_length_msg, content_len_buffer, strlen(content_len_buffer));
+
+    // Append a trailing CRLF sequence
+    strncat(content_length_msg, "\r\n\r\n", CONTENT_TERM_LEN);
+
+    printf("content_length_msg: %s\n", content_length_msg);
+    printf("length: %lu\n", length);
+
+    // Append the content-length header
+    strncat(response_string, content_length_msg, strlen(content_length_msg) + 1);
+
+    printf("response string: %s\n", response_string);
+}
+
+/*
+    Appends the body and a trailing CRLF sequence to the HTTP response string
+
+    @param
+    response_string: Contains the HTTP response
+    content_string: The body content to be appended
+    length: The length of the string to be appended
+*/
+void append_body(char *response_string, const char *content_string, unsigned long length)
+{
+    if(content_string != NULL)
     {
-        perror("Error closing socket");
-        exit(EXIT_FAILURE);
+        strncat(response_string, content_string, length);
+        strncat(response_string, "\r\n", 2);
     }
+}
+
+/*
+    Converts an integer into a string
+
+    @param
+    string: Where the converted value will be stored
+    n: The number to be converted
+ */
+void int_to_string(char *string, unsigned long n)
+{
+    char          buffer[TEN] = {0};
+    int           digits      = 0;
+    unsigned long i           = n;
+
+    // If n is zero
+    if(n == 0)
+    {
+        string[0] = '0';
+        string[1] = '\0';
+        return;
+    }
+
+    // Extract digits and store them in reverse order
+    while(i > 0)
+    {
+        buffer[digits++] = (char)((i % TEN) + '0');
+        i                = i / TEN;
+        printf("%lu\n", i);
+    }
+    printf("digits: %d\n", digits);
+
+    // Reverse the order of the digits in the buffer
+    for(int j = 0; j < digits; j++)
+    {
+        string[j] = buffer[digits - j - 1];
+    }
+    string[digits] = '\0';
+}
+
+/*
+    Opens a file at the specified path and retrieves its file descriptor and metadata
+
+    @param
+    request_path: The path of the file to open
+    file_fd: Stores the file descriptor of the file
+    file_state: Stores the file's metadata
+ */
+void open_file_at_path(const char *request_path, int *file_fd, struct stat *file_stat)
+{
+    // Allocate memory for the file path
+    char *path = (char *)malloc(sizeof(char) * (strlen(request_path) + FILE_PATH_LEN + 1));
+
+    // Set the base directory
+#if(defined(__APPLE__) && defined(__MACH__))
+    strncpy(path, "./resources", FILE_PATH_LEN);
+#endif
+
+#if defined(__linux__)
+    strncpy(path, "../resources", FILE_PATH_LEN);
+#endif
+
+    // Append the requested file path
+    strncpy(path + FILE_PATH_LEN, request_path, strlen(request_path) + 1);
+    printf("file path: %s\n", path);
+
+    // Open the file and store the file descriptor
+    *file_fd = open(path, O_RDONLY | O_CLOEXEC);
+
+    // Retrieve the file metadata
+    stat(path, file_stat);
+
+#if(defined(__APPLE__) && defined(__MACH__))
+    printf("File size of %s: %lld bytes\n", path, file_stat->st_size);
+#endif
+
+#if defined(__linux__)
+    printf("File size of %s: %ld bytes\n", path, file_stat->st_size);
+#endif
+
+    printf("File descriptor: %d\n", *file_fd);
+
+    // Free the allocated memory
+    free(path);
 }
