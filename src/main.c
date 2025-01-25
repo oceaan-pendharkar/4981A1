@@ -691,9 +691,14 @@ int has_valid_first_line(const char *buffer)
 
 /*
     Checks to make sure headers have colons and end in \r\n\r\n, and each ends with \r\n
-    If they don't returns -1
-    If they do returns 0
-    buffer: holds entire request
+    This assumes the request line has already been validate
+
+    @param
+    buffer: Holds the entire HTTP request
+
+    @return
+    0: The headers are valid
+    -1: The headers are invalid
  */
 int has_valid_headers(const char *buffer)
 {
@@ -708,6 +713,7 @@ int has_valid_headers(const char *buffer)
     }
     c = buffer[++i];    // buffer is now \n
 
+    // Process the headers
     while(final_rn_found == -1 && i < BUFFER_SIZE)
     {
         // find a colon
@@ -738,6 +744,7 @@ int has_valid_headers(const char *buffer)
             continue;
         }
 
+        // check if the next characters are \r\n, marking the end of the header
         if(buffer[i] == '\r' && buffer[i + 1] == '\n')
         {
             printf("found final r and n at position %d\n", i);
@@ -750,6 +757,8 @@ int has_valid_headers(const char *buffer)
 
 /*
     Extracts the request path from the HTTP request header
+
+    @param
     req_path: pointer to an array where the extracted request path will be stored
     buffer: String containing the full HTTP request header (HTTP method, req path, other metadata)
  */
@@ -786,13 +795,22 @@ void set_request_path(char *req_path, const char *buffer)
     printf("request path: %s\n", req_path);
 }
 
+/*
+    Extracts the HTTP method from the request header
+
+    @param
+    req_header: Pointer to an array where the extracted HTTP method will be stored
+    buffer: String containing the full HTTP request header
+ */
 void set_request_method(char *req_header, const char *buffer)
 {
     char c;
     int  i = 0;
     int  j = 0;
 
+    // Read the buffer
     c = buffer[i];
+
     // Copy chars from buffer to req_header until first space
     while(c != ' ' && j < REQ_HEADER_LEN)
     {
@@ -808,12 +826,20 @@ void set_request_method(char *req_header, const char *buffer)
     printf("request path length: %d\n", (int)strlen(req_header));
 }
 
+/*
+    Converts an integer into a string
+
+    @param
+    string: Where the converted value will be stored
+    n: The number to be converted
+ */
 void int_to_string(char *string, unsigned long n)
 {
     char          buffer[TEN] = {0};
     int           digits      = 0;
     unsigned long i           = n;
 
+    // If n is zero
     if(n == 0)
     {
         string[0] = '0';
@@ -821,14 +847,16 @@ void int_to_string(char *string, unsigned long n)
         return;
     }
 
+    // Extract digits and store them in reverse order
     while(i > 0)
     {
         buffer[digits++] = (char)((i % TEN) + '0');
         i                = i / TEN;
         printf("%lu\n", i);
     }
-
     printf("digits: %d\n", digits);
+
+    // Reverse the order of the digits in the buffer
     for(int j = 0; j < digits; j++)
     {
         string[j] = buffer[digits - j - 1];
@@ -836,9 +864,20 @@ void int_to_string(char *string, unsigned long n)
     string[digits] = '\0';
 }
 
+/*
+    Opens a file at the specified path and retrieves its file descriptor and metadata
+
+    @param
+    request_path: The path of the file to open
+    file_fd: Stores the file descriptor of the file
+    file_state: Stores the file's metadata
+ */
 void open_file_at_path(const char *request_path, int *file_fd, struct stat *file_stat)
 {
+    // Allocate memory for the file path
     char *path = (char *)malloc(sizeof(char) * (strlen(request_path) + FILE_PATH_LEN + 1));
+
+    // Set the base directory
 #if(defined(__APPLE__) && defined(__MACH__))
     strncpy(path, "./resources", FILE_PATH_LEN);
 #endif
@@ -847,9 +886,14 @@ void open_file_at_path(const char *request_path, int *file_fd, struct stat *file
     strncpy(path, "../resources", FILE_PATH_LEN);
 #endif
 
+    // Append the requested file path
     strncpy(path + FILE_PATH_LEN, request_path, strlen(request_path) + 1);
     printf("file path: %s\n", path);
+
+    // Open the file and store the file descriptor
     *file_fd = open(path, O_RDONLY | O_CLOEXEC);
+
+    // Retrieve the file metadata
     stat(path, file_stat);
 
 #if(defined(__APPLE__) && defined(__MACH__))
@@ -861,30 +905,64 @@ void open_file_at_path(const char *request_path, int *file_fd, struct stat *file
 #endif
 
     printf("File descriptor: %d\n", *file_fd);
+
+    // Free the allocated memory
     free(path);
 }
 
+/*
+    Appends a message to the response string
+
+    @param
+    response: Where the message will be appended
+    msg: The message to be copied
+ */
 void append_msg_to_response_string(char *response, const char *msg)
 {
     strncpy(response, msg, strlen(msg));
     response[strlen(msg)] = '\0';
 }
 
-// This one is special because it has the extra \r\n and needs to be constructed with the appropriate length
+/*
+    Appends a Content-Length header to the HTTP response string
+    This one is special because it has the extra \r\n and needs to be constructed with the appropriate length
+
+    @param
+    response_string: Where the content-length will be appended
+    length: Length of the HTTP body
+ */
 void append_content_length_msg(char *response_string, unsigned long length)
 {
     char content_len_buffer[CONTENT_LEN_BUF];
     char content_length_msg[BUFFER_SIZE] = "Content-Length: ";
+
+    // Convert the length value to a string and store it in content_len_buffer
     int_to_string(content_len_buffer, length);
     printf("content length: %s\n", content_len_buffer);
+
+    // Append the length
     strncat(content_length_msg, content_len_buffer, strlen(content_len_buffer));
+
+    // Append a trailing CRLF sequence
     strncat(content_length_msg, "\r\n\r\n", CONTENT_TERM_LEN);
+
     printf("content_length_msg: %s\n", content_length_msg);
     printf("length: %lu\n", length);
+
+    // Append the content-length header
     strncat(response_string, content_length_msg, strlen(content_length_msg) + 1);
+
     printf("response string: %s\n", response_string);
 }
 
+/*
+    Appends the body and a trailing CRLF sequence to the HTTP response string
+
+    @param
+    response_string: Contains the HTTP response
+    content_string: The body content to be appended
+    length: The length of the string to be appended
+*/
 void append_body(char *response_string, const char *content_string, unsigned long length)
 {
     if(content_string != NULL)
@@ -894,6 +972,17 @@ void append_body(char *response_string, const char *content_string, unsigned lon
     }
 }
 
+/*
+    Sends the HTTP response to the client
+
+    @param
+    newsockfd: The client's socket file descriptor
+    response_string: The HTTP response string to be sent
+
+    @return
+    0: Response successfully sent
+    -1: An error occurred while writing to the socket
+ */
 int write_to_client(int newsockfd, char *response_string)
 {
     ssize_t valwrite;
@@ -908,26 +997,42 @@ int write_to_client(int newsockfd, char *response_string)
     return 0;
 }
 
-// returns -2 if page isn't found
-// returns -3 if malloc failed
+/*
+    Reads the content of a file at the specified path and writes it to a string
+
+    @param
+    content_string: Where the text content of a file will be stored
+    length: Length of the content
+    file_path: The path to the file being read
+
+    @return
+    0: File was read successfully and stored in content_string
+    -1: An error occurred while reading the file
+    -2: The requested file was not found, 404 page loaded instead
+    -3: Memory allocation failed while creating content_string
+ */
 int write_to_content_string(char **content_string, unsigned long *length, const char *file_path)
 {
-    char         c;
-    struct stat  file_stat;
-    struct stat *fileStat = &file_stat;
-    int          file_fd;
-    char        *path;
-    const char  *MSG_404 = "<p>404 NOT FOUND</p>\0";
-    int          retval  = 0;
+    char         c;                                    // Temp character for read functions
+    struct stat  file_stat;                            // Holds file metadata
+    struct stat *fileStat = &file_stat;                // Pointer to file metadata
+    int          file_fd;                              // File descriptor for the file
+    char        *path;                                // String that will store the file path
+    const char  *MSG_404 = "<p>404 NOT FOUND</p>\0";   // 404 error message
+    int          retval  = 0;                        // Return value
 
+    // Check if the requested file path is "/"
     if(strcmp(file_path, "/") == 0)
     {
+        // Allocate memory for the index path
         path = (char *)malloc(sizeof(char) * (FILE_PATH_LEN + 1));
         if(path == NULL)
         {
             perror("malloc");
             return -3;
         }
+
+        // Copy the index path
         for(size_t i = 0; i < strlen(INDEX_FILE_PATH); i++)
         {
             path[i] = INDEX_FILE_PATH[i];
@@ -936,12 +1041,15 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
     }
     else
     {
+        // Allocate memory for the requested file path
         path = (char *)malloc(sizeof(char) * (strlen(file_path) + 1));
         if(path == NULL)
         {
             perror("malloc");
             return -3;
         }
+
+        // Copy the file path
         for(size_t i = 0; i < strlen(file_path); i++)
         {
             path[i] = file_path[i];
@@ -949,12 +1057,19 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
         path[strlen(file_path)] = '\0';
     }
 
+    // Open the file at the specified path
     open_file_at_path(path, &file_fd, fileStat);
+
+    // Free the allocated path memory
     free(path);
+
+    // If file could not be opened, served the 404 error page
     if(file_fd == -1)
     {
         printf("opening 404 file: %s\n", file_path);
         file_fd = open("./resources/404.html", O_RDONLY | O_CLOEXEC);
+
+        // If the 404 file is missing, return an error message
         if(file_fd == -1)
         {
             perror("webserver (open: 404 html msg file has been moved or deleted)");
@@ -972,6 +1087,8 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
             close(file_fd);
             return -2;
         }
+
+        // If the 404 file exists but is empty, set a default size for the error message
         if(fileStat->st_size == 0)
         {
             fileStat->st_size = SIZE_404_MSG;
@@ -987,14 +1104,16 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
     printf("filestat st_size: %ld\n", fileStat->st_size);
 #endif
 
+    // Allocate memory for the content string
     *content_string = (char *)malloc(sizeof(char) * ((size_t)fileStat->st_size + 1));
-
     if(*content_string == NULL)
     {
         perror("webserver (malloc)");
         close(file_fd);
         return -3;
     }
+
+    // Read the contents of the file into content_string
     for(int i = 0; i < fileStat->st_size; i++)
     {
         ssize_t valread = read(file_fd, &c, sizeof(char));
@@ -1010,12 +1129,23 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
     }
     (*content_string)[(*length)] = '\0';
     printf("content_string: %s\n", *content_string);
+
+    // Close the file descriptor
     close(file_fd);
+
     // we don't want to free the content_string here because we need it to stay allocated
     // in order to put it in the response_string in handle_client
+
     return retval;
 }
 
+/*
+    Sets the content-type header based on the file extension in the requested path
+
+    @param
+    request_path: The path of the requested file
+    content_type_string: A string where the appropriate content-type will be stored
+ */
 void set_content_type_from_file_extension(const char *request_path, char *content_type_string)
 {
     size_t req_path_i                   = strlen(request_path) - 1;
@@ -1074,6 +1204,12 @@ void set_content_type_from_file_extension(const char *request_path, char *conten
     printf("set content type header to: %s\n", content_type_string);
 }
 
+/*
+    Closes a socket
+
+    @param
+    sockfd: The file descriptor of the socket to close
+ */
 static void socket_close(int sockfd)
 {
     if(close(sockfd) == -1)
