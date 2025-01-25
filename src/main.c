@@ -91,33 +91,34 @@ int main(int arg, const char *argv[])
     char               buffer[BUFFER_SIZE];    // Buffer for storing incoming data
     struct sockaddr_in host_addr;              // Server's address structure
     unsigned int       host_addrlen;           // Length of the server address
-    fd_set             readfds;
-    size_t             max_clients;
-    int               *client_sockets;
-    int                sd;
+    fd_set             readfds;                // Set of file descriptors for select
+    size_t             max_clients;            // Maximum number of clients that can connect
+    int               *client_sockets;         // Array of active client sockets
+    int                sd;                     // Temp variable for socket descriptor
 
     // Create client address
     struct sockaddr_in client_addr;
     int                client_addrlen = sizeof(client_addr);
 
-    // Create a socket
+    // Create a TCP socket
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);    // NOLINT(android-cloexec-socket)
     if(sockfd == -1)
     {
         perror("webserver (socket)");
         return 1;
     }
-    printf("socket created successfully\n");
+    printf("Socket created successfully\n");
 
     // (Debugging) Print program arguments
     printf("%d\n", arg);
     printf("%s\n", argv[0]);
 
+    // Set up Signal Handler
     setup_signal_handler();
+
+    // Initialize client socket, address and number as zero or null
     client_sockets = NULL;
     max_clients    = 0;
-
-// Initialize client address structure to zero
 #if defined(__linux__)
     memset(&client_addr, 0, sizeof(client_addr));
 #endif
@@ -126,6 +127,7 @@ int main(int arg, const char *argv[])
     // Initialize the server address structure
     host_addrlen = sizeof(host_addr);
 
+    // Use IPv4 to set the server port and bind to available network interface
     host_addr.sin_family      = AF_INET;
     host_addr.sin_port        = htons(PORT);
     host_addr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -137,7 +139,7 @@ int main(int arg, const char *argv[])
         close(sockfd);
         return 1;
     }
-    printf("socket successfully bound to address\n");
+    printf("Socket successfully bound to address\n");
 
     // Listen for incoming connections
     if(listen(sockfd, SOMAXCONN) != 0)
@@ -146,22 +148,24 @@ int main(int arg, const char *argv[])
         close(sockfd);
         return 1;
     }
-    printf("server listening for connections\n");
+    printf("Server listening for connections\n\n");
 
     // Infinite loop to handle client connections
     while(!exit_flag)
     {
-        int     max_fd;
-        int     activity;
-        int     newsockfd;
-        int     sockn;                             // Socket for new connection
+        int     max_fd;                            // Maximum file descriptor for select
+        int     activity;                          // Number of ready file descriptors
+        int     newsockfd;                         // New socket for incoming connection
+        int     sockn;                             // Temporary socket descriptor
         ssize_t valread;                           // For read operations
         ssize_t valwrite;                          // For write operations
         char    req_header[REQ_HEADER_LEN + 1];    // Request the header buffer
         char    req_path[PATH_LEN];                // Path of the requested file
-        int     is_head = 0;                       // Flag to indicate a HEAD request
-        int     is_get  = 0;
-        int     is_http = 0;
+
+        // Flags for HEAD, GET and valid HTTP requests
+        int is_head = 0;
+        int is_get  = 0;
+        int is_http = 0;
 
         // Clear the socket set
 #ifndef __clang_analyzer__
@@ -178,13 +182,13 @@ int main(int arg, const char *argv[])
     #pragma GCC diagnostic pop
 #endif
 
+        // Start with the server socket
         max_fd = sockfd;
 
         // Add the client sockets to the set
         for(size_t i = 0; i < max_clients; i++)
         {
             sd = client_sockets[i];
-
             if(sd > 0)
             {
 #if defined(__FreeBSD__) && defined(__GNUC__)
@@ -202,8 +206,8 @@ int main(int arg, const char *argv[])
             }
         }
 
+        // Wait for activity on one of the monitored sockets
         activity = select(max_fd + 1, &readfds, NULL, NULL, NULL);
-
         if(activity < 0)
         {
             perror("Select error");
@@ -351,6 +355,8 @@ int main(int arg, const char *argv[])
     }
 
     free(client_sockets);
+
+    // Close the server socket
     close(sockfd);
 
     printf("closing connection\n");
