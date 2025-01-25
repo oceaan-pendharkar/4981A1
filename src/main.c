@@ -374,6 +374,9 @@ int main(int arg, const char *argv[])
 #pragma GCC diagnostic pop
 }
 
+/*
+    Sets up the signal handler
+ */
 static void setup_signal_handler(void)
 {
     struct sigaction sa;
@@ -392,6 +395,11 @@ static void setup_signal_handler(void)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 
+/*
+    Updates the signal flag upon receiving the exit signal
+
+    @param signum: The signal number received
+ */
 static void sigint_handler(int signum)
 {
     exit_flag = 1;
@@ -400,12 +408,19 @@ static void sigint_handler(int signum)
 #pragma GCC diagnostic pop
 
 /*
-Processes an incoming HTTP request from a client, constructing an HTTP response
-and sending it back to the client
+    Processes an incoming HTTP request from a client, constructing an HTTP response
+    and sending it back to the client
 
-newsockfd: socket fd for the client
-request_path: file path requested by the client
-is_head: flag indicating whether the HTTP request is a HEAD request
+    @param
+    newsockfd: socket fd for the client
+    request_path: file path requested by the client
+    is_head: flag indicating whether the HTTP request is a HEAD request
+
+    @return
+    0: The HTTP response was successfully sent to the client
+    -1: An error occurred while generating the HTTP response body
+    -2: The requested file was not found
+    -3: Memory allocatio for the response failed
  */
 int handle_client(int newsockfd, const char *request_path, int is_head)
 {
@@ -516,7 +531,13 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
 
 /*
     Checks if the header starts with GET
+
+    @param
     req_header: string containing the first part of the HTTP request header
+
+    @return
+    0: The header starts with GET
+    -1: The header does not start with GET
  */
 int is_get_request(const char *req_header)
 {
@@ -529,7 +550,13 @@ int is_get_request(const char *req_header)
 
 /*
     Checks if the header starts with HEAD
+
+    @param
     req_header: string containing the first part of the HTTP request header
+
+    @return
+    0: The header starts with HEAD
+    -1: The header does not start with HEAD
  */
 int is_head_request(const char *req_header)
 {
@@ -541,28 +568,36 @@ int is_head_request(const char *req_header)
 }
 
 /*
-    Checks if the header contains a legit HTTP request method
-    if not, returns -1
-    if yes, returns 0
+    Checks if the header contains a valid HTTP request method
+
+    @param
     req_header: string containing first part of HTTP request header
+    buffer: A string containing the full HTTP request
+
+    @return
+    0: The buffer contains a valid HTTP request
+    -1: The buffer does not contain a valid HTTP request
  */
 int is_http_request(const char *req_header, const char *buffer)
 {
     int valid_firstline = 0;
     int valid_headers   = 0;
-    printf("entered is http request\n");
+    // printf("entered is http request\n");
+
+    // Check if the method in req_header is a valid HTTP method
     if(strcmp(req_header, "GET") != 0 && strcmp(req_header, "HEAD") != 0 && strcmp(req_header, "POST") != 0 && strcmp(req_header, "PUT") != 0 && strcmp(req_header, "DELETE") != 0 && strcmp(req_header, "CONNECT") != 0 && strcmp(req_header, "OPTIONS") != 0 &&
        strcmp(req_header, "TRACE") != 0 && strcmp(req_header, "PATCH") != 0)
     {
         return -1;
     }
-    printf("checking first line\n");
-    valid_firstline = has_valid_first_line(buffer);
-    printf("valid_firstline: %d\n", valid_firstline);
 
-    printf("checking headers\n");
+    // Check if the first line is valid
+    valid_firstline = has_valid_first_line(buffer);
+    // printf("valid_firstline: %d\n", valid_firstline);
+
+    // Check if the headers are valid
     valid_headers = has_valid_headers(buffer);
-    printf("valid_headers: %d\n", valid_headers);
+    // printf("valid_headers: %d\n", valid_headers);
     if(valid_firstline == -1 || valid_headers == -1)
     {
         return -1;
@@ -572,23 +607,30 @@ int is_http_request(const char *req_header, const char *buffer)
 
 /*
     Checks if the request has a valid first line like METHOD URI HTTP/x{x}\r\n
-    if not, returns -1
-    if yes, returns 0
-    When we use this one, we've already checked that the request has a valid method
-    buffer: the buffer containing the request
+    This function assumes the HTTP method has already been validated
+
+    @param
+    buffer: The buffer containing the HTTP request
+
+    @return
+    0: The request has a valid first line
+    -1: The request is invalid
  */
 int has_valid_first_line(const char *buffer)
 {
     int  i = 0;
     char c = buffer[i];
     //    printf("in has valid_first_line\n");
+
+    // Traverse until the first space
     while(c != ' ' && i < BUFFER_SIZE)
     {
         c = buffer[++i];
         //        printf("%c", c);
     }
     //    printf("found space\n");
-    // will return -1 if there is no URI before HTTP/
+
+    // Check that there is no URI before HTTP/
     if(i < BUFFER_SIZE - 4)
     {
         if(buffer[i + 1] == 'H' && buffer[i + 2] == 'T' && buffer[i + 3] == 'T' && buffer[i + 4] == 'P' && buffer[i + FILE_EXT_LEN] == '/')
@@ -597,18 +639,26 @@ int has_valid_first_line(const char *buffer)
             return -1;
         }
     }
+
     //    printf("looking for next space\n");
+    // Traverse until the next space, end of the uRI
     while(c != ' ' && i < BUFFER_SIZE)
     {
         c = buffer[++i];
         //        printf("%c", c);
     }
+
+    // Check that the URI does not end with a '/'
     if(i < BUFFER_SIZE - 1 && buffer[i + 1] != '/')
     {
         //        printf("no slash in first line found\n");
         return -1;
     }
+
+    // Move past the URI
     c = buffer[++i];
+
+    // Traverse until the next space
     while(c != ' ' && i < BUFFER_SIZE)
     {
         c = buffer[++i];
@@ -622,11 +672,14 @@ int has_valid_first_line(const char *buffer)
         //        printf("%c%c%c%c\n", buffer[i], buffer[i + 1], buffer[i + 2], buffer[i + 3]);
         return -1;
     }
+
+    // Traverse until '\r'
     while(c != '\r')
     {
         c = buffer[++i];
     }
-    // will return -1 if there is no \r\n
+
+    // Check if the line ends with \r\n
     if(buffer[i + 1] != '\n')
     {
         //        printf("no \\r\\n found\n");
