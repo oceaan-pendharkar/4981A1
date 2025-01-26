@@ -571,6 +571,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head, int is_i
         append_msg_to_response_string(response_string, HTTP_METHOD_NOT_ALLOWED);
         strncat(response_string, content_type_line, strlen(content_type_line) + 1);
         append_content_length_msg(response_string, length);
+        append_body(response_string, *content_ptr, length);
 
         printf("writing 405 content to response: %s\n", response_string);
         write_to_client(newsockfd, response_string);    // Send 405 response
@@ -597,6 +598,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head, int is_i
         append_msg_to_response_string(response_string, HTTP_NOT_FOUND);
         strncat(response_string, content_type_line, strlen(content_type_line) + 1);
         append_content_length_msg(response_string, length);
+        append_body(response_string, *content_ptr, length);
         write_to_client(newsockfd, response_string);    // Send 404 response
         close(newsockfd);                               // Close the socket
         free(content_string);
