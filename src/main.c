@@ -79,6 +79,7 @@ int main(int arg, const char *argv[])
         // Flags for HEAD, GET and valid HTTP requests
         int is_head = 0;
         int is_get  = 0;
+        int is_img  = 0;
         int is_http = 0;
 
         // Clear the socket set
@@ -214,6 +215,9 @@ int main(int arg, const char *argv[])
 
                     is_get = is_get_request(req_header);
                     printf("is_get: %d\n", is_get);
+
+                    is_img = is_img_request(buffer);
+                    printf("is_img: %d\n", is_img);
 
                     is_http = is_http_request(req_header, buffer);
                     printf("is_http: %d\n", is_http);
@@ -394,6 +398,42 @@ int is_get_request(const char *req_header)
 }
 
 /*
+    Checks if the HTTP request is for an image
+
+    @param
+    buffer: A string containing the full HTTP request
+
+    @return
+    0: The buffer contains an image request
+    -1: The buffer does not contain an image request
+ */
+int is_img_request(const char *buffer)
+{
+    int  i = 0;
+    char c = buffer[i];
+
+    // Traverse until the first '.'
+    while(c != '.' && c != '\0' && i < BUFFER_SIZE)
+    {
+        c = buffer[++i];
+    }
+
+    // If no '.' was found, it's not an image request
+    if(c != '.')
+    {
+        return -1;
+    }
+
+    // Check the next few characters to identify the file extension
+    if(strncmp(&buffer[i], ".jpg", FILE_EXT_LEN - 1) == 0 || strncmp(&buffer[i], ".jpeg", FILE_EXT_LEN) == 0 || strncmp(&buffer[i], ".png", FILE_EXT_LEN - 1) == 0 || strncmp(&buffer[i], ".gif", FILE_EXT_LEN - 1) == 0)
+    {
+        return 0;
+    }
+
+    return -1;
+}
+
+/*
     Checks if the header contains a valid HTTP request method
 
     @param
@@ -409,6 +449,7 @@ int is_http_request(const char *req_header, const char *buffer)
     int valid_firstline = 0;
     int valid_headers   = 0;
     // printf("entered is http request\n");
+    // printf("Buffer content: %s\n", buffer);
 
     // Check if the method in req_header is a valid HTTP method
     if(strcmp(req_header, "GET") != 0 && strcmp(req_header, "HEAD") != 0 && strcmp(req_header, "POST") != 0 && strcmp(req_header, "PUT") != 0 && strcmp(req_header, "DELETE") != 0 && strcmp(req_header, "CONNECT") != 0 && strcmp(req_header, "OPTIONS") != 0 &&

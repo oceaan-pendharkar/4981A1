@@ -72,6 +72,7 @@ static void sigint_handler(int signum);
 void        set_request_method(char *req_header, const char *buffer);
 int         is_head_request(const char *req_header);
 int         is_get_request(const char *req_header);
+int is_img_request(const char *buffer);
 int         is_http_request(const char *req_header, const char *buffer);
 void        set_request_path(char *req_path, const char *buffer);
 int         handle_client(int newsockfd, const char *request_path, int is_head);
