@@ -185,7 +185,7 @@ int main(int arg, const char *argv[])
 #endif
                 // Read from the socket: this is the request
                 valread = read(sd, buffer, BUFFER_SIZE);
-                if(valread <= 0)
+                if(valread < 0)
                 {
                     perror("webserver (read)");
                     close(sd);
@@ -226,7 +226,7 @@ int main(int arg, const char *argv[])
                         req_path[TEN] = '\0';
                     }
                     // if it's not a valid http request we'll serve back 400 error
-                    else if(is_http_request(req_header, buffer) < 0)
+                    else if(is_http < 0)
                     {
                         printf("gets 400 file path and isn't proper http request\n");
                         strncpy(req_path, "/400.txt", LEN_405);
@@ -247,9 +247,12 @@ int main(int arg, const char *argv[])
                     }
 
                     // Handle the client request
-                    valwrite = handle_client(sd, req_path, is_head);
-                    if(valwrite == -1)
+                    valwrite          = handle_client(sd, req_path, is_head);
+                    client_sockets[i] = 0;    // Remove from client list
+                    if(valwrite < 0)
                     {
+                        close(sd);
+                        FD_CLR(sd, &readfds);
                         continue;
                     }
                 }
@@ -518,7 +521,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
     // length of response_string = (HTTP HEADER LEN) + content length string length + body length
     if(valread == -2)
     {
-        // This means the file requested was not found/openable
+        // Serve 404 response
         response_length = strlen(HTTP_NOT_FOUND) + strlen(content_type_line) + CONTENT_LEN_BUF + length;
         response_string = (char *)malloc(sizeof(char) * (response_length + 1));
         if(response_string == NULL)
@@ -528,8 +531,15 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
             return -3;
         }
         append_msg_to_response_string(response_string, HTTP_NOT_FOUND);
+        strncat(response_string, content_type_line, strlen(content_type_line) + 1);
+        append_content_length_msg(response_string, length);
+        write_to_client(newsockfd, response_string);    // Send 404 response
+        close(newsockfd);                               // Close the socket
+        free(content_string);
+        return -2;
     }
-    else if(strcmp(request_path, "/405.txt") == 0)
+
+    if(strcmp(request_path, "/405.txt") == 0)
     {
         // The method is unsupported
         response_length = strlen(HTTP_METHOD_NOT_ALLOWED) + strlen(content_type_line) + CONTENT_LEN_BUF + length;
@@ -554,6 +564,12 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
             return -3;
         }
         append_msg_to_response_string(response_string, HTTP_BAD_REQUEST);
+        strncat(response_string, content_type_line, strlen(content_type_line) + 1);
+        append_content_length_msg(response_string, length);
+        write_to_client(newsockfd, response_string);    // Send 400 response
+        close(newsockfd);                               // Close the socket
+        free(content_string);
+        return -1;
     }
     else
     {
@@ -707,28 +723,35 @@ int has_valid_headers(const char *buffer)
     int  final_rn_found = -1;
 
     // go to the first \r\n (which is right before the headers)
-    while(c != '\r' && i < BUFFER_SIZE)
+    while(i < BUFFER_SIZE - 1 && c != '\r')
     {
         c = buffer[++i];
     }
     c = buffer[++i];    // buffer is now \n
-
     // Process the headers
-    while(final_rn_found == -1 && i < BUFFER_SIZE)
+    while(i < BUFFER_SIZE && final_rn_found == -1)
     {
         // find a colon
-        while(c != ':' && i < BUFFER_SIZE)
+        while(i < BUFFER_SIZE - 1 && c != ':')
         {
             c = buffer[++i];
+        }
+        if(i > BUFFER_SIZE - 1)
+        {
+            return -1;
         }
         // make sure there is at least 1 char after the colon
         c = buffer[i];
         //        printf("found colon in headers before char: %c\n", c);
 
         // find the \r\n
-        while(c != '\r' && i < BUFFER_SIZE)
+        while(i < BUFFER_SIZE - 3 && c != '\r')
         {
             c = buffer[++i];
+        }
+        if(i > BUFFER_SIZE - 2)
+        {
+            return -1;
         }
         //        printf("found slash r after colon at position %d: %c\n", i, c);
         if(buffer[++i] != '\n')
@@ -824,34 +847,21 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
     // If file could not be opened, served the 404 error page
     if(file_fd == -1)
     {
-        printf("opening 404 file: %s\n", file_path);
-        file_fd = open("./resources/404.html", O_RDONLY | O_CLOEXEC);
-
         // If the 404 file is missing, return an error message
-        if(file_fd == -1)
+        perror("webserver (open: 404 html msg file has been moved or deleted)");
+        *content_string = (char *)malloc((sizeof(char) * SIZE_404_MSG) + 1);
+        if(*content_string == NULL)
         {
-            perror("webserver (open: 404 html msg file has been moved or deleted)");
-            *content_string = (char *)malloc((sizeof(char) * SIZE_404_MSG) + 1);
-            if(*content_string == NULL)
-            {
-                perror("webserver (malloc)");
-                close(file_fd);
-                return -3;
-            }
-            for(int i = 0; i <= SIZE_404_MSG; i++)
-            {
-                (*content_string)[i] = MSG_404[i];
-            }
+            perror("webserver (malloc)");
             close(file_fd);
-            return -2;
+            return -3;
         }
-
-        // If the 404 file exists but is empty, set a default size for the error message
-        if(fileStat->st_size == 0)
+        for(int i = 0; i <= SIZE_404_MSG; i++)
         {
-            fileStat->st_size = SIZE_404_MSG;
+            (*content_string)[i] = MSG_404[i];
         }
-        retval = -2;
+        close(file_fd);
+        return -2;
     }
 
 #if(defined(__APPLE__) && defined(__MACH__))

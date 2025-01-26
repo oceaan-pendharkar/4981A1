@@ -2,7 +2,6 @@
 #define MAIN_H
 
 // ./steps/step007.c
-#include "main.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
