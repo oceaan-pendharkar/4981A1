@@ -542,14 +542,14 @@ int handle_client(int newsockfd, const char *request_path, int is_head, int is_i
 
     // we malloc the content_string in this function
     // length also gets set to the length of the body in this function
-    if(is_img == -1)
-    {
-        valread = write_to_content_string(content_ptr, &length, request_path);
-    }
-    else
-    {
-        valread = write_to_content_binary(content_ptr, &length, request_path);
-    }
+    //    if(is_img == -1)
+    //    {
+    valread = write_to_content_string(content_ptr, &length, request_path);
+    //    }
+    //    else
+    //    {
+    //        valread = write_to_content_binary(content_ptr, &length, request_path);
+    //    }
 
     if(valread == -1)
     {
@@ -568,27 +568,6 @@ int handle_client(int newsockfd, const char *request_path, int is_head, int is_i
     }
     printf("content_type_line: %s\n", content_type_line);
 
-    // length of response_string = (HTTP HEADER LEN) + content length string length + body length
-    if(valread == -2)
-    {
-        // Serve 404 response
-        response_length = strlen(HTTP_NOT_FOUND) + strlen(content_type_line) + CONTENT_LEN_BUF + length;
-        response_string = (char *)malloc(sizeof(char) * (response_length + 1));
-        if(response_string == NULL)
-        {
-            perror("webserver (malloc)");
-            free(content_string);
-            return -3;
-        }
-        append_msg_to_response_string(response_string, HTTP_NOT_FOUND);
-        strncat(response_string, content_type_line, strlen(content_type_line) + 1);
-        append_content_length_msg(response_string, length);
-        write_to_client(newsockfd, response_string);    // Send 404 response
-        close(newsockfd);                               // Close the socket
-        free(content_string);
-        return -2;
-    }
-
     if(strcmp(request_path, "/405.txt") == 0)
     {
         // The method is unsupported
@@ -601,8 +580,42 @@ int handle_client(int newsockfd, const char *request_path, int is_head, int is_i
             return -3;
         }
         append_msg_to_response_string(response_string, HTTP_METHOD_NOT_ALLOWED);
+        strncat(response_string, content_type_line, strlen(content_type_line) + 1);
+        append_content_length_msg(response_string, length);
+
+        printf("writing 405 content to response: %s\n", response_string);
+        write_to_client(newsockfd, response_string);    // Send 405 response
+        close(newsockfd);                               // Close the socket
+        free(content_string);
+        free(response_string);
+        return 0;
     }
-    else if(strcmp(request_path, "/400.txt") == 0)
+    // length of response_string = (HTTP HEADER LEN) + content length string length + body length
+    if(valread == -2)
+    {
+        // Serve 404 response
+        response_length = strlen(HTTP_NOT_FOUND) + strlen(content_type_line) + CONTENT_LEN_BUF + length;
+        response_string = (char *)malloc(sizeof(char) * (response_length + 1));
+        if(response_string == NULL)
+        {
+            perror("webserver (malloc)");
+            if(is_img == -1)
+            {
+                free(content_string);
+            }
+            return -3;
+        }
+        append_msg_to_response_string(response_string, HTTP_NOT_FOUND);
+        strncat(response_string, content_type_line, strlen(content_type_line) + 1);
+        append_content_length_msg(response_string, length);
+        write_to_client(newsockfd, response_string);    // Send 404 response
+        close(newsockfd);                               // Close the socket
+        free(content_string);
+        free(response_string);
+        return -2;
+    }
+
+    if(strcmp(request_path, "/400.txt") == 0)
     {
         // The request is bad
         response_length = strlen(HTTP_BAD_REQUEST) + strlen(content_type_line) + CONTENT_LEN_BUF + length;
@@ -619,11 +632,14 @@ int handle_client(int newsockfd, const char *request_path, int is_head, int is_i
         write_to_client(newsockfd, response_string);    // Send 400 response
         close(newsockfd);                               // Close the socket
         free(content_string);
+        free(response_string);
         return -1;
     }
-    else
+    // if it's an image we write directly to the socket
+    if(is_img == 0)
     {
-        // Request was successful
+        int retval = 0;
+        printf("it's an image!!!\n");
         response_length = strlen(HTTP_OK) + strlen(content_type_line) + CONTENT_LEN_BUF + length;
         response_string = (char *)malloc(sizeof(char) * (response_length + 1));
         if(response_string == NULL)
@@ -632,8 +648,49 @@ int handle_client(int newsockfd, const char *request_path, int is_head, int is_i
             free(content_string);
             return -3;
         }
+
         append_msg_to_response_string(response_string, HTTP_OK);
+        strncat(response_string, content_type_line, strlen(content_type_line) + 1);
+        append_content_length_msg(response_string, length);
+
+        if(write_to_client(newsockfd, response_string) < 0)
+        {
+            perror("Error writing to client");
+            retval = -1;
+            goto cleanup;
+        }
+
+        if(write_to_content_binary(newsockfd, request_path) < 0)
+        {
+            perror("Error writing content to client");
+            retval = -1;
+            goto cleanup;
+        }
+
+    cleanup:
+        if(response_string)
+        {
+            free(response_string);
+        }
+        if(content_string)
+        {
+            free(content_string);
+        }
+        return retval;
     }
+    //    else
+    //    {
+    // Request was successful
+    response_length = strlen(HTTP_OK) + strlen(content_type_line) + CONTENT_LEN_BUF + length;
+    response_string = (char *)malloc(sizeof(char) * (response_length + 1));
+    if(response_string == NULL)
+    {
+        perror("webserver (malloc)");
+        free(content_string);
+        return -3;
+    }
+    append_msg_to_response_string(response_string, HTTP_OK);
+    //    }
 
     // Append the content-type header
     strncat(response_string, content_type_line, strlen(content_type_line) + 1);
@@ -651,6 +708,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head, int is_i
     // free allocated memory for the body
     free(content_string);
     result = write_to_client(newsockfd, response_string);
+    free(response_string);
 
     // write to client
     return result;
@@ -792,7 +850,7 @@ int has_valid_headers(const char *buffer)
         }
         // make sure there is at least 1 char after the colon
         c = buffer[i];
-        //        printf("found colon in headers before char: %c\n", c);
+        printf("found colon in headers before char: %c\n", c);
 
         // find the \r\n
         while(i < BUFFER_SIZE - 3 && c != '\r')
@@ -957,15 +1015,17 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
     return retval;
 }
 
-int write_to_content_binary(char **content_string, unsigned long *length, const char *file_path)
+int write_to_content_binary(int fd, const char *file_path)
 {
-    struct stat  file_stat;                             // Holds file metadata
-    struct stat *fileStat = &file_stat;                 // Pointer to file metadata
-    int          file_fd;                               // File descriptor for the file
-    char        *path;                                  // String to store the file path
-    const char  *MSG_404 = "<p>404 NOT FOUND</p>\0";    // 404 error message
-    int          retval  = 0;                           // Return value
-    ssize_t      bytes_read;
+    struct stat  file_stat;                // Holds file metadata
+    struct stat *fileStat = &file_stat;    // Pointer to file metadata
+    int          file_fd;                  // File descriptor for the file
+    char        *path;                     // String to store the file path
+                                           //    const char  *MSG_404 = "<p>404 NOT FOUND</p>\0";    // 404 error message
+    int     retval = 0;                    // Return value
+    ssize_t bytes_read;
+    ssize_t bytes_written;
+    char   *buffer;
 
     // Check if the requested file path is "/"
     if(strcmp(file_path, "/") == 0)
@@ -1006,15 +1066,15 @@ int write_to_content_binary(char **content_string, unsigned long *length, const 
     // If file could not be opened, serve the 404 error page
     if(file_fd == -1)
     {
-        perror("webserver (open: 404 file not found)");
-        *content_string = (char *)malloc(SIZE_404_MSG + 1);
-        if(*content_string == NULL)
-        {
-            perror("webserver (malloc)");
-            return -3;
-        }
-        strncpy(*content_string, MSG_404, SIZE_404_MSG);
-        (*content_string)[SIZE_404_MSG] = '\0';
+        //        perror("webserver (open: 404 file not found)");
+        //        *content_string = (char *)malloc(SIZE_404_MSG + 1);
+        //        if(*content_string == NULL)
+        //        {
+        //            perror("webserver (malloc)");
+        //            return -3;
+        //        }
+        //        strncpy(*content_string, MSG_404, SIZE_404_MSG);
+        //        (*content_string)[SIZE_404_MSG] = '\0';
         return -2;
     }
 
@@ -1027,32 +1087,42 @@ int write_to_content_binary(char **content_string, unsigned long *length, const 
 #endif
 
     // Allocate memory for the binary content
-    *content_string = (char *)malloc((size_t)fileStat->st_size);
+    buffer = (char *)malloc((size_t)fileStat->st_size);
 
-    if(*content_string == NULL)
+    if(buffer == NULL)
     {
         perror("webserver (malloc)");
         close(file_fd);
         return -3;
     }
 
-    // Read the entire file into content_string
-    bytes_read = read(file_fd, *content_string, (size_t)fileStat->st_size);
-
+    // Read the entire file into buffer
+    bytes_read = read(file_fd, buffer, (size_t)fileStat->st_size);
     if(bytes_read < 0)
     {
         perror("webserver (read binary file)");
-        free(*content_string);
+        free(buffer);
         close(file_fd);
         return -1;
     }
 
-    // Set the length of the binary data
-    *length = (unsigned long)bytes_read;
+    bytes_written = write(fd, buffer, (size_t)fileStat->st_size);
+    if(bytes_written < 0)
+    {
+        perror("Error writing to destination socket");
+        free(buffer);
+        close(fd);
+        close(file_fd);
+        return -1;
+    }
 
-    // Close the file descriptor
+    //    // Set the length of the binary data
+    //    *length = (unsigned long)bytes_read;
+
+    // Close the file descriptors
     close(file_fd);
-
+    close(fd);
+    free(buffer);
     return retval;    // Success
 }
 
@@ -1067,17 +1137,18 @@ int write_to_content_binary(char **content_string, unsigned long *length, const 
     0: Response successfully sent
     -1: An error occurred while writing to the socket
  */
-int write_to_client(int newsockfd, char *response_string)
+int write_to_client(int newsockfd, const char *response_string)
 {
     ssize_t valwrite;
     valwrite = write(newsockfd, response_string, strlen(response_string));
     if(valwrite < 0)
     {
         perror("webserver (write)");
-        free(response_string);
+        //        free(response_string);
         return -1;
     }
-    free(response_string);
+    //    free(response_string);
+    printf("successfully wrote to client\n");
     return 0;
 }
 
