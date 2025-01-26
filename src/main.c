@@ -625,7 +625,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head, int is_i
         return -1;
     }
     // if it's an image we write directly to the socket
-    if(is_img == 0)
+    if(is_img == 0 && is_head == -1)
     {
         int retval = 0;
         printf("it's an image!!!\n");
