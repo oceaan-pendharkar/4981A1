@@ -991,6 +991,19 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
     return retval;
 }
 
+/*
+    Reads the content of a file at the specified path and writes it as binary data to the specified file descriptor.
+
+    @param
+    fd: The file descriptor to which the binary content will be written
+    file_path: The path to the file being read
+
+    @return
+    0: File was read successfully and written to the file descriptor
+    -1: An error occurred while reading or writing the file
+    -2: The requested file was not found (404 error)
+    -3: Memory allocation failed during processing
+ */
 int write_to_content_binary(int fd, const char *file_path)
 {
     struct stat  file_stat;                // Holds file metadata
