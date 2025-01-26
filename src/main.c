@@ -251,7 +251,7 @@ int main(int arg, const char *argv[])
                     }
 
                     // Handle the client request
-                    valwrite          = handle_client(sd, req_path, is_head);
+                    valwrite          = handle_client(sd, req_path, is_head, is_img);
                     client_sockets[i] = 0;    // Remove from client list
                     if(valwrite < 0)
                     {
@@ -520,6 +520,7 @@ void set_request_path(char *req_path, const char *buffer)
     newsockfd: socket fd for the client
     request_path: file path requested by the client
     is_head: flag indicating whether the HTTP request is a HEAD request
+    is_img: flag indicating that the HTTP request is for an image
 
     @return
     0: The HTTP response was successfully sent to the client
@@ -527,7 +528,7 @@ void set_request_path(char *req_path, const char *buffer)
     -2: The requested file was not found
     -3: Memory allocatio for the response failed
  */
-int handle_client(int newsockfd, const char *request_path, int is_head)
+int handle_client(int newsockfd, const char *request_path, int is_head, int is_img)
 {
     char  *response_string;                     // The Full HTTP response
     char  *content_string = {0};                // HTTP response body
@@ -541,7 +542,15 @@ int handle_client(int newsockfd, const char *request_path, int is_head)
 
     // we malloc the content_string in this function
     // length also gets set to the length of the body in this function
-    valread = write_to_content_string(content_ptr, &length, request_path);
+    if(is_img == -1)
+    {
+        valread = write_to_content_string(content_ptr, &length, request_path);
+    }
+    else
+    {
+        valread = write_to_content_binary(content_ptr, &length, request_path);
+    }
+
     if(valread == -1)
     {
         perror("webserver (http response body)");
@@ -946,6 +955,105 @@ int write_to_content_string(char **content_string, unsigned long *length, const 
     // in order to put it in the response_string in handle_client
 
     return retval;
+}
+
+int write_to_content_binary(char **content_string, unsigned long *length, const char *file_path)
+{
+    struct stat  file_stat;                             // Holds file metadata
+    struct stat *fileStat = &file_stat;                 // Pointer to file metadata
+    int          file_fd;                               // File descriptor for the file
+    char        *path;                                  // String to store the file path
+    const char  *MSG_404 = "<p>404 NOT FOUND</p>\0";    // 404 error message
+    int          retval  = 0;                           // Return value
+    ssize_t      bytes_read;
+
+    // Check if the requested file path is "/"
+    if(strcmp(file_path, "/") == 0)
+    {
+        // Allocate memory for the index path
+        path = (char *)malloc(sizeof(char) * (FILE_PATH_LEN + 1));
+        if(path == NULL)
+        {
+            perror("malloc");
+            return -3;
+        }
+
+        // Copy the index path
+        strncpy(path, INDEX_FILE_PATH, FILE_PATH_LEN);
+        path[FILE_PATH_LEN] = '\0';
+    }
+    else
+    {
+        // Allocate memory for the requested file path
+        path = (char *)malloc(sizeof(char) * (strlen(file_path) + 1));
+        if(path == NULL)
+        {
+            perror("malloc");
+            return -3;
+        }
+
+        // Copy the file path
+        strncpy(path, file_path, strlen(file_path));
+        path[strlen(file_path)] = '\0';
+    }
+
+    // Open the file at the specified path
+    open_file_at_path(path, &file_fd, fileStat);
+
+    // Free the allocated path memory
+    free(path);
+
+    // If file could not be opened, serve the 404 error page
+    if(file_fd == -1)
+    {
+        perror("webserver (open: 404 file not found)");
+        *content_string = (char *)malloc(SIZE_404_MSG + 1);
+        if(*content_string == NULL)
+        {
+            perror("webserver (malloc)");
+            return -3;
+        }
+        strncpy(*content_string, MSG_404, SIZE_404_MSG);
+        (*content_string)[SIZE_404_MSG] = '\0';
+        return -2;
+    }
+
+#if(defined(__APPLE__) && defined(__MACH__))
+    printf("File size: %lld bytes\n", fileStat->st_size);
+#endif
+
+#if defined(__linux__)
+    printf("File size: %ld bytes\n", fileStat->st_size);
+#endif
+
+    // Allocate memory for the binary content
+    *content_string = (char *)malloc((size_t)fileStat->st_size);
+
+    if(*content_string == NULL)
+    {
+        perror("webserver (malloc)");
+        close(file_fd);
+        return -3;
+    }
+
+    // Read the entire file into content_string
+    bytes_read = read(file_fd, *content_string, (size_t)fileStat->st_size);
+
+    if(bytes_read < 0)
+    {
+        perror("webserver (read binary file)");
+        free(*content_string);
+        close(file_fd);
+        return -1;
+    }
+
+    // Set the length of the binary data
+    *length = (unsigned long)bytes_read;
+
+    // Close the file descriptor
+    close(file_fd);
+
+    return retval;    // Success
 }
 
 /*
