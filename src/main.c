@@ -2,13 +2,12 @@
 
 int main(int arg, const char *argv[])
 {
-    char               buffer[BUFFER_SIZE];    // Buffer for storing incoming data
-    struct sockaddr_in host_addr;              // Server's address structure
-    unsigned int       host_addrlen;           // Length of the server address
-    fd_set             readfds;                // Set of file descriptors for select
-    size_t             max_clients;            // Maximum number of clients that can connect
-    int               *client_sockets;         // Array of active client sockets
-    int                sd;                     // Temp variable for socket descriptor
+    struct sockaddr_in host_addr;         // Server's address structure
+    unsigned int       host_addrlen;      // Length of the server address
+    fd_set             readfds;           // Set of file descriptors for select
+    size_t             max_clients;       // Maximum number of clients that can connect
+    int               *client_sockets;    // Array of active client sockets
+    int                sd;                // Temp variable for socket descriptor
 
     // Create client address
     struct sockaddr_in client_addr;
@@ -75,6 +74,7 @@ int main(int arg, const char *argv[])
         ssize_t valwrite;                          // For write operations
         char    req_header[REQ_HEADER_LEN + 1];    // Request the header buffer
         char    req_path[PATH_LEN];                // Path of the requested file
+        char    buffer[BUFFER_SIZE] = {0};         // Buffer for storing incoming data
 
         // Flags for HEAD, GET and valid HTTP requests
         int is_head = 0;
@@ -448,8 +448,6 @@ int is_http_request(const char *req_header, const char *buffer)
 {
     int valid_firstline = 0;
     int valid_headers   = 0;
-    // printf("entered is http request\n");
-    // printf("Buffer content: %s\n", buffer);
 
     // Check if the method in req_header is a valid HTTP method
     if(strcmp(req_header, "GET") != 0 && strcmp(req_header, "HEAD") != 0 && strcmp(req_header, "POST") != 0 && strcmp(req_header, "PUT") != 0 && strcmp(req_header, "DELETE") != 0 && strcmp(req_header, "CONNECT") != 0 && strcmp(req_header, "OPTIONS") != 0 &&
@@ -460,11 +458,9 @@ int is_http_request(const char *req_header, const char *buffer)
 
     // Check if the first line is valid
     valid_firstline = has_valid_first_line(buffer);
-    // printf("valid_firstline: %d\n", valid_firstline);
 
     // Check if the headers are valid
     valid_headers = has_valid_headers(buffer);
-    // printf("valid_headers: %d\n", valid_headers);
     if(valid_firstline == -1 || valid_headers == -1)
     {
         return -1;
@@ -542,14 +538,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head, int is_i
 
     // we malloc the content_string in this function
     // length also gets set to the length of the body in this function
-    //    if(is_img == -1)
-    //    {
     valread = write_to_content_string(content_ptr, &length, request_path);
-    //    }
-    //    else
-    //    {
-    //        valread = write_to_content_binary(content_ptr, &length, request_path);
-    //    }
 
     if(valread == -1)
     {
@@ -678,9 +667,8 @@ int handle_client(int newsockfd, const char *request_path, int is_head, int is_i
         }
         return retval;
     }
-    //    else
-    //    {
     // Request was successful
+    printf("request was successful");
     response_length = strlen(HTTP_OK) + strlen(content_type_line) + CONTENT_LEN_BUF + length;
     response_string = (char *)malloc(sizeof(char) * (response_length + 1));
     if(response_string == NULL)
@@ -690,7 +678,6 @@ int handle_client(int newsockfd, const char *request_path, int is_head, int is_i
         return -3;
     }
     append_msg_to_response_string(response_string, HTTP_OK);
-    //    }
 
     // Append the content-type header
     strncat(response_string, content_type_line, strlen(content_type_line) + 1);
@@ -709,6 +696,7 @@ int handle_client(int newsockfd, const char *request_path, int is_head, int is_i
     free(content_string);
     result = write_to_client(newsockfd, response_string);
     free(response_string);
+    close(newsockfd);
 
     // write to client
     return result;
@@ -744,38 +732,31 @@ int has_valid_first_line(const char *buffer)
 {
     int  i = 0;
     char c = buffer[i];
-    //    printf("in has valid_first_line\n");
 
     // Traverse until the first space
     while(c != ' ' && i < BUFFER_SIZE)
     {
         c = buffer[++i];
-        //        printf("%c", c);
     }
-    //    printf("found space\n");
 
     // Check that there is no URI before HTTP/
     if(i < BUFFER_SIZE - 4)
     {
         if(buffer[i + 1] == 'H' && buffer[i + 2] == 'T' && buffer[i + 3] == 'T' && buffer[i + 4] == 'P' && buffer[i + FILE_EXT_LEN] == '/')
         {
-            //            printf("no URI found before HTTP/\n");
             return -1;
         }
     }
 
-    //    printf("looking for next space\n");
     // Traverse until the next space, end of the uRI
     while(c != ' ' && i < BUFFER_SIZE)
     {
         c = buffer[++i];
-        //        printf("%c", c);
     }
 
     // Check that the URI does not end with a '/'
     if(i < BUFFER_SIZE - 1 && buffer[i + 1] != '/')
     {
-        //        printf("no slash in first line found\n");
         return -1;
     }
 
@@ -792,8 +773,6 @@ int has_valid_first_line(const char *buffer)
     // will return -1 if there is no HTTP/x{x}
     if(buffer[i] != 'H' || buffer[i + 1] != 'T' || buffer[i + 2] != 'T' || buffer[i + 3] != 'P' || buffer[i + 4] != '/')
     {
-        //        printf("no \"HTTP/\" found\n");
-        //        printf("%c%c%c%c\n", buffer[i], buffer[i + 1], buffer[i + 2], buffer[i + 3]);
         return -1;
     }
 
@@ -806,8 +785,6 @@ int has_valid_first_line(const char *buffer)
     // Check if the line ends with \r\n
     if(buffer[i + 1] != '\n')
     {
-        //        printf("no \\r\\n found\n");
-        //        printf("%c\n", c);
         return -1;
     }
     return 0;
@@ -836,6 +813,7 @@ int has_valid_headers(const char *buffer)
         c = buffer[++i];
     }
     c = buffer[++i];    // buffer is now \n
+
     // Process the headers
     while(i < BUFFER_SIZE && final_rn_found == -1)
     {
@@ -850,7 +828,6 @@ int has_valid_headers(const char *buffer)
         }
         // make sure there is at least 1 char after the colon
         c = buffer[i];
-        printf("found colon in headers before char: %c\n", c);
 
         // find the \r\n
         while(i < BUFFER_SIZE - 3 && c != '\r')
@@ -861,7 +838,6 @@ int has_valid_headers(const char *buffer)
         {
             return -1;
         }
-        //        printf("found slash r after colon at position %d: %c\n", i, c);
         if(buffer[++i] != '\n')
         {
             return -1;
@@ -871,14 +847,12 @@ int has_valid_headers(const char *buffer)
         // if we don't hit another \r we havent hit the end of the headers
         if(buffer[++i] != '\r')
         {
-            //            printf("continuing to the next header\n");
             continue;
         }
 
         // check if the next characters are \r\n, marking the end of the header
         if(buffer[i] == '\r' && buffer[i + 1] == '\n')
         {
-            printf("found final r and n at position %d\n", i);
             final_rn_found = 0;
         }
         break;
@@ -1021,11 +995,10 @@ int write_to_content_binary(int fd, const char *file_path)
     struct stat *fileStat = &file_stat;    // Pointer to file metadata
     int          file_fd;                  // File descriptor for the file
     char        *path;                     // String to store the file path
-                                           //    const char  *MSG_404 = "<p>404 NOT FOUND</p>\0";    // 404 error message
-    int     retval = 0;                    // Return value
-    ssize_t bytes_read;
-    ssize_t bytes_written;
-    char   *buffer;
+    int          retval = 0;               // Return value
+    ssize_t      bytes_read;
+    ssize_t      bytes_written;
+    char        *buffer;
 
     // Check if the requested file path is "/"
     if(strcmp(file_path, "/") == 0)
@@ -1063,18 +1036,9 @@ int write_to_content_binary(int fd, const char *file_path)
     // Free the allocated path memory
     free(path);
 
-    // If file could not be opened, serve the 404 error page
+    // If file could not be opened, serve the 404 error page (returning -2 signals this)
     if(file_fd == -1)
     {
-        //        perror("webserver (open: 404 file not found)");
-        //        *content_string = (char *)malloc(SIZE_404_MSG + 1);
-        //        if(*content_string == NULL)
-        //        {
-        //            perror("webserver (malloc)");
-        //            return -3;
-        //        }
-        //        strncpy(*content_string, MSG_404, SIZE_404_MSG);
-        //        (*content_string)[SIZE_404_MSG] = '\0';
         return -2;
     }
 
@@ -1116,10 +1080,7 @@ int write_to_content_binary(int fd, const char *file_path)
         return -1;
     }
 
-    //    // Set the length of the binary data
-    //    *length = (unsigned long)bytes_read;
-
-    // Close the file descriptors
+    // Close the file descriptors and free dynamic memory
     close(file_fd);
     close(fd);
     free(buffer);
@@ -1144,10 +1105,8 @@ int write_to_client(int newsockfd, const char *response_string)
     if(valwrite < 0)
     {
         perror("webserver (write)");
-        //        free(response_string);
         return -1;
     }
-    //    free(response_string);
     printf("successfully wrote to client\n");
     return 0;
 }
