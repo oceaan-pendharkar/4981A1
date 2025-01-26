@@ -332,8 +332,8 @@ static void sigint_handler(int signum)
     Extracts the HTTP method from the request header
 
     @param
-    req_header: Pointer to an array where the extracted HTTP method will be stored
-    buffer: String containing the full HTTP request header
+    req_header: Where the HTTP request method will be stored
+    buffer: The full HTTP request header
  */
 void set_request_method(char *req_header, const char *buffer)
 {
@@ -363,7 +363,7 @@ void set_request_method(char *req_header, const char *buffer)
     Checks if the header starts with HEAD
 
     @param
-    req_header: string containing the first part of the HTTP request header
+    req_header: The HTTP request method
 
     @return
     0: The header starts with HEAD
@@ -382,7 +382,7 @@ int is_head_request(const char *req_header)
     Checks if the header starts with GET
 
     @param
-    req_header: string containing the first part of the HTTP request header
+    req_header: The HTTP request method
 
     @return
     0: The header starts with GET
@@ -401,11 +401,11 @@ int is_get_request(const char *req_header)
     Checks if the HTTP request is for an image
 
     @param
-    buffer: A string containing the full HTTP request
+    buffer: The full HTTP request header
 
     @return
-    0: The buffer contains an image request
-    -1: The buffer does not contain an image request
+    0: The request target is an image
+    -1: The request target is not an image
  */
 int is_img_request(const char *buffer)
 {
@@ -437,8 +437,8 @@ int is_img_request(const char *buffer)
     Checks if the header contains a valid HTTP request method
 
     @param
-    req_header: string containing first part of HTTP request header
-    buffer: A string containing the full HTTP request
+    req_header: The HTTP request method
+    buffer: The full HTTP request header
 
     @return
     0: The buffer contains a valid HTTP request
@@ -476,8 +476,8 @@ int is_http_request(const char *req_header, const char *buffer)
     Extracts the request path from the HTTP request header
 
     @param
-    req_path: pointer to an array where the extracted request path will be stored
-    buffer: String containing the full HTTP request header (HTTP method, req path, other metadata)
+    req_path: The path of the requested file
+    buffer: The full HTTP request header
  */
 void set_request_path(char *req_path, const char *buffer)
 {
