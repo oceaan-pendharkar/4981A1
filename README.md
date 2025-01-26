@@ -1,6 +1,6 @@
-# template-c Repository Guide
+# HTTP Server Repository Guide
 
-Welcome to the `c template` repository. This guide will help you set up and run the provided scripts.
+Welcome to the `HTTP server` repository. This guide will help you set up and run the provided scripts.
 
 ## **Table of Contents**
 
@@ -9,21 +9,20 @@ Welcome to the `c template` repository. This guide will help you set up and run 
 3. [Running the `generate-cmakelists.sh` Script](#running-the-generate-cmakelistssh-script)
 4. [Running the `change-compiler.sh` Script](#running-the-change-compilersh-script)
 5. [Running the `build.sh` Script](#running-the-buildsh-script)
-5. [Running the `build-all.sh` Script](#running-the-build-allsh-script)
-6. [Copy the template to start a new project](#copy-the-template-to-start-a-new-project)
+6. [Run the server](#run-the-server)
 
 ## **Cloning the Repository**
 
 Clone the repository using the following command:
 
 ```bash
-git clone https://github.com/programming101dev/template-c.git
+git clone https://github.com/oceaan-pendharkar/4981A1 
 ```
 
 Navigate to the cloned directory:
 
 ```bash
-cd template-c
+cd 4981A1
 ```
 
 Ensure the scripts are executable:
@@ -71,30 +70,37 @@ To build the program run:
 ./build.sh
 ```
 
-## **Running the build-all.sh Script**
-
 To build the program with all compilers run:
 
 ```bash
 ./build-all.sh
 ```
 
-## **Copy the template to start a new project**
-
-To create a new project from the template, run:
+Navigate to the cloned directory:
 
 ```bash
-./copy-template.sh <desitnation directory>
+cd build
+```
+## **Run the server**
+
+To start the server, run:
+
+```bash
+./main
+```
+Once the server is running, you can view our homepage using the following options
+
+### Browser 
+Enter either into your browser's search bar:
+```bash
+localhost:8080
 ```
 
-This will copy all of the files needed to start a new project.
-
-1. Edit the files.txt
-2. run ./generate-cmakelists.sh
-3. run ./change-compiler.sh -c <compiler>
-4. run ./build.sh
-
-The files.txt file contains:
-<executable> <source files> <header files> <libraries>
-
-When you need to add/removes files to/from the project you must rerun the 4 steps above. 
+```bash
+localhost:8080/index.html
+```
+### Command Line (Text only)
+Open a new command line window and run:
+```bash
+localhost:8080/test.txt 
+```
